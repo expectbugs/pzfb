@@ -227,6 +227,31 @@ cp /tmp/pzfb_out/zombie/core/Color*.class "$PZ/zombie/core/"
 - For higher performance, `fbFill`-style direct ByteBuffer writes (no file I/O) could sustain 60fps easily.
 - A future `fbSetPixels(texture, luaTable)` or similar could bypass file I/O entirely if Kahlua can pass arrays to Java efficiently.
 
+## Distribution / Installation Problem
+
+### Current State
+The patched `Color*.class` files (Color.class, Color$1.class, Color$2.class, Color$3.class) must be placed in the PZ install directory at `<PZ>/zombie/core/`. PZ does NOT load .class files from mod directories — the classpath is `"."` (install dir) + `projectzomboid.jar` only.
+
+This means the current install is two steps:
+1. Copy 4 class files to PZ install directory
+2. Enable the Lua mod from Workshop
+
+### Goal: One-Click Workshop Install
+For a proper Steam Workshop release, the mod needs to work without manual file copying. The TrueVideo mod author (Workshop ID 3665970132) claimed his "real version" would be a simple Workshop download, implying he solved this distribution problem. Since his framebuffer technique appears to be the same as ours (he got it working with no slowdowns), he likely also solved the deployment problem.
+
+### Possible Solutions to Investigate
+1. **Lua-side auto-deploy:** On game start, a Lua script copies the .class files from the mod's media directory to the PZ install directory. Would require a game restart to take effect (classes loaded at JVM startup). Could detect if deployment is needed and prompt the user.
+
+2. **PZ's `-classpath` or `-cp` manipulation:** The native launcher (`ProjectZomboid64`) reads `ProjectZomboid64.json` for classpath. If mod directories could be added to this JSON, or if there's an environment variable override, class files could stay in the mod directory.
+
+3. **Java agent / instrumentation:** A Java agent can modify classes at load time. If PZ supports `-javaagent` JVM args, an agent could intercept Color class loading and inject our methods without replacing the file on disk.
+
+4. **Custom classloader hook:** If PZ's code has any mod-loading hook that touches the classloader, we could exploit it to add our mod directory to the class search path.
+
+5. **Self-extracting on first run:** The Lua mod detects the classes aren't deployed, extracts them from a bundled location (e.g., base64-encoded in a Lua string or as a binary file in media/), writes them to the PZ install dir, and prompts for restart. Ugly but functional.
+
+The fresh instance should investigate these approaches. The TrueVideo author's approach is the strongest lead — if he claimed Workshop-only distribution, one of these methods works.
+
 ## Potential Future Enhancements
 
 - **fbSetPixelData(Texture, byte[])** — accept pixel data directly from Java without file I/O
