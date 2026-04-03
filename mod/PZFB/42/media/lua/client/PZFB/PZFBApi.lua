@@ -85,6 +85,27 @@ function PZFB.loadRaw(fb, path)
     return Color.fbLoadRaw(fb.texture, path)
 end
 
+--- Load a single frame from a concatenated raw RGBA file.
+--- The file contains multiple frames of w*h*4 bytes each, back to back.
+--- @param fb table framebuffer handle
+--- @param path string absolute file path to concatenated raw RGBA data
+--- @param frameIndex number zero-based frame index
+--- @return boolean true if loaded successfully, false if out of range or error
+function PZFB.loadRawFrame(fb, path, frameIndex)
+    if not fb or not fb.texture then return false end
+    if not PZFB.AVAILABLE then return false end
+    return Color.fbLoadRawFrame(fb.texture, path, frameIndex)
+end
+
+--- Get the size of a file in bytes.
+--- Useful for calculating total frame count: fileSize / (width * height * 4)
+--- @param path string absolute file path
+--- @return number file size in bytes, or -1 if file doesn't exist
+function PZFB.fileSize(path)
+    if not PZFB.AVAILABLE then return -1 end
+    return Color.fbFileSize(path)
+end
+
 --- Get the underlying PZ Texture object for drawing.
 --- Use with drawTextureScaled() in a UI panel's render() method.
 --- @param fb table framebuffer handle

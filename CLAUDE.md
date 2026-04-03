@@ -44,7 +44,7 @@
 ├── java/zombie/core/
 │   └── Color.java         # Patched Color class source
 ├── build/                 # Compiled output (git-ignored)
-├── class_files/           # Distribution .class files (Color + 3 inner)
+├── class_files/           # Distribution .class files (Color + 4 inner)
 └── mod/PZFB/
     ├── common/            # Required empty dir for B42
     └── 42/
@@ -71,7 +71,7 @@ We replace `zombie.core.Color` (a Kahlua-whitelisted Java class) with a version 
 5. **PZ's UI `render()` also runs on MainThread** — PZ's own draw methods (`drawTextureScaled` etc.) queue commands to SpriteRenderer, they don't call GL directly.
 6. **`Texture.setData(ByteBuffer)` crashes from Lua** — it calls `glTexSubImage2D` on the wrong thread.
 7. **`Texture.getData()` crashes from Lua** — cause unknown, crashes immediately on any texture.
-8. **Anonymous inner classes** compile to `Color$1.class`, `Color$2.class`, `Color$3.class`. ALL must be deployed.
+8. **Anonymous inner classes** compile to `Color$1.class` through `Color$4.class`. ALL must be deployed.
 9. **No reflection needed** — `TextureID.getID()` is public. PZ's own Texture constructor handles GL allocation; we just read the id and upload pixels via `glTexSubImage2D`.
 10. **The decompiled Color.class recompiles cleanly** via CFR decompiler + Java 25 javac. No modifications needed to the original methods.
 
@@ -103,13 +103,15 @@ rm -f "$PZ/zombie/core/Color"*.class
 
 ### Low-level (Color.fb* static methods):
 ```lua
-Color.fbPing()                        -- Returns "PZFB 1.0.0"
-Color.fbVersion()                     -- Returns "1.0.0"
+Color.fbPing()                        -- Returns "PZFB 1.1.0"
+Color.fbVersion()                     -- Returns "1.1.0"
 Color.fbCreate(width, height)         -- Returns Texture (NEAREST filtering)
 Color.fbCreateLinear(width, height)   -- Returns Texture (LINEAR filtering)
 Color.fbIsReady(tex)                  -- Per-texture readiness check
 Color.fbFill(tex, r, g, b, a)        -- Fills solid color (0-255 each)
 Color.fbLoadRaw(tex, path)            -- Loads raw RGBA file, returns boolean
+Color.fbLoadRawFrame(tex, path, idx)  -- Loads frame idx from concatenated raw file
+Color.fbFileSize(path)                -- Returns file size in bytes (long), or -1
 Color.fbDestroy(tex)                  -- Frees GL resources
 ```
 
@@ -120,6 +122,8 @@ PZFB.create(w, h) / createLinear(w,h) -- Returns fb handle table
 PZFB.isReady(fb)                      -- GL texture ready?
 PZFB.fill(fb, r, g, b, a)            -- Fill solid color
 PZFB.loadRaw(fb, path)               -- Load raw RGBA file
+PZFB.loadRawFrame(fb, path, idx)      -- Load frame from concatenated raw file
+PZFB.fileSize(path)                   -- Get file size in bytes
 PZFB.getTexture(fb)                   -- Get Texture for drawing
 PZFB.destroy(fb)                      -- Clean up
 ```

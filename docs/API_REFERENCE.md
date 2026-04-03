@@ -108,6 +108,41 @@ local ok = PZFB.loadRaw(fb, "/home/user/Zomboid/Lua/emulator/frame.raw")
 | 320x240 | General | 307,200 bytes |
 | 640x480 | VGA | 1,228,800 bytes |
 
+### `PZFB.loadRawFrame(fb, path, frameIndex)`
+
+Load a single frame from a concatenated raw RGBA file. The file contains multiple frames of `width * height * 4` bytes each, back to back (e.g., output from `ffmpeg -f rawvideo`).
+
+- **Parameters:**
+  - `fb` (table) — framebuffer handle
+  - `path` (string) — absolute file path to concatenated raw RGBA data
+  - `frameIndex` (number) — zero-based frame index
+- **Returns:** `boolean` — true if loaded, false if out of range or error
+- **Note:** Uses `RandomAccessFile` for seeking — does not read the entire file into memory.
+
+```lua
+-- Play video frames sequentially
+local frameNum = 0
+function MyPanel:onTick()
+    if PZFB.loadRawFrame(fb, "/path/to/video.raw", frameNum) then
+        frameNum = frameNum + 1
+    else
+        frameNum = 0  -- loop or stop
+    end
+end
+```
+
+### `PZFB.fileSize(path)`
+
+Get the size of a file in bytes. Useful for calculating total frame count.
+
+- **Parameters:**
+  - `path` (string) — absolute file path
+- **Returns:** `number` — file size in bytes, or -1 if file doesn't exist
+
+```lua
+local totalFrames = PZFB.fileSize("/path/to/video.raw") / (width * height * 4)
+```
+
 ### `PZFB.getTexture(fb)`
 
 Get the underlying PZ `Texture` object for drawing.

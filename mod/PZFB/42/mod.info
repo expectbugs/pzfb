@@ -3,6 +3,6 @@ id=PZFB
 description=Pixel-level framebuffer rendering for PZ mods. Enables emulators, video, dynamic graphics, and more.
 poster=poster.png
 icon=icon.png
-modversion=1.0.0
+modversion=1.1.0
 versionMin=42.0
 url=https://github.com/expectbugs/pzfb

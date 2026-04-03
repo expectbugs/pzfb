@@ -611,7 +611,7 @@ implements Serializable {
 
     private static final java.util.concurrent.ConcurrentHashMap<zombie.core.textures.Texture, Boolean> _fbState =
         new java.util.concurrent.ConcurrentHashMap<>();
-    private static final String PZFB_VERSION = "1.0.0";
+    private static final String PZFB_VERSION = "1.1.0";
 
     public static String fbPing() {
         return "PZFB " + PZFB_VERSION;
@@ -690,6 +690,50 @@ implements Serializable {
             return true;
         } catch (Exception e) {
             return false;
+        }
+    }
+
+    public static boolean fbLoadRawFrame(zombie.core.textures.Texture tex, String path, int frameIndex) {
+        if (!fbIsReady(tex)) return false;
+        try {
+            final int w = tex.getWidth();
+            final int h = tex.getHeight();
+            final int frameSize = w * h * 4;
+            final long offset = (long) frameIndex * frameSize;
+            java.io.RandomAccessFile raf = new java.io.RandomAccessFile(path, "r");
+            if (offset + frameSize > raf.length()) {
+                raf.close();
+                return false;
+            }
+            byte[] data = new byte[frameSize];
+            raf.seek(offset);
+            raf.readFully(data);
+            raf.close();
+            final java.nio.ByteBuffer buf = java.nio.ByteBuffer.allocateDirect(frameSize);
+            buf.put(data);
+            buf.flip();
+            final int glId = tex.getTextureId().getID();
+            zombie.core.opengl.RenderThread.queueInvokeOnRenderContext(new Runnable() {
+                public void run() {
+                    org.lwjgl.opengl.GL11.glBindTexture(0x0DE1, glId);
+                    org.lwjgl.opengl.GL11.glTexSubImage2D(
+                        0x0DE1, 0, 0, 0, w, h, 0x1908, 0x1401, buf
+                    );
+                }
+            });
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    public static long fbFileSize(String path) {
+        try {
+            java.io.File file = new java.io.File(path);
+            if (!file.exists()) return -1;
+            return file.length();
+        } catch (Exception e) {
+            return -1;
         }
     }
 

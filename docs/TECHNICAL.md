@@ -72,7 +72,9 @@ Color.fbCreateLinear(width, height)         -- Returns Texture (LINEAR filtering
 Color.fbIsReady(tex)                        -- Returns boolean (per-texture)
 Color.fbFill(tex, r, g, b, a)              -- Fills solid color (0-255 each)
 Color.fbLoadRaw(tex, path)                  -- Loads raw RGBA file, returns boolean
-Color.fbDestroy(tex)                        -- Frees GL resources
+Color.fbLoadRawFrame(tex, path, frameIndex)  -- Loads frame from concatenated raw file
+Color.fbFileSize(path)                       -- Returns file size in bytes, or -1
+Color.fbDestroy(tex)                         -- Frees GL resources
 ```
 
 ### High-level Lua API (recommended — see docs/API_REFERENCE.md):
@@ -85,8 +87,10 @@ PZFB.createLinear(width, height)            -- Returns fb handle (LINEAR)
 PZFB.isReady(fb)                            -- Check GL readiness
 PZFB.fill(fb, r, g, b, a)                  -- Fill solid color
 PZFB.loadRaw(fb, path)                      -- Load raw RGBA file
-PZFB.getTexture(fb)                         -- Get Texture for drawing
-PZFB.destroy(fb)                            -- Clean up
+PZFB.loadRawFrame(fb, path, frameIndex)      -- Load frame from concatenated raw file
+PZFB.fileSize(path)                          -- Get file size in bytes
+PZFB.getTexture(fb)                          -- Get Texture for drawing
+PZFB.destroy(fb)                             -- Clean up
 ```
 
 ### Timing:

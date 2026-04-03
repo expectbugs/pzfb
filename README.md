@@ -102,6 +102,8 @@ panel:releaseInput()
 | `PZFB.isReady(fb)` | `boolean` | Check if GL texture is allocated |
 | `PZFB.fill(fb, r, g, b, a)` | — | Fill with solid color (0-255 each) |
 | `PZFB.loadRaw(fb, path)` | `boolean` | Load raw RGBA file (w*h*4 bytes, no header) |
+| `PZFB.loadRawFrame(fb, path, idx)` | `boolean` | Load frame from concatenated raw file |
+| `PZFB.fileSize(path)` | `number` | Get file size in bytes (-1 if not found) |
 | `PZFB.getTexture(fb)` | `Texture\|nil` | Get PZ Texture for `drawTextureScaled()` |
 | `PZFB.destroy(fb)` | — | Free GL resources |
 
