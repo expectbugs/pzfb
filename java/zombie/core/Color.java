@@ -1018,22 +1018,33 @@ implements Serializable {
 
     public static String fbFFmpegDiag() {
         StringBuilder sb = new StringBuilder();
-        sb.append("host_spawn=").append(useHostSpawn()).append("; ");
-        String pvRuntime = System.getenv("PRESSURE_VESSEL_RUNTIME");
-        sb.append("pv=").append(pvRuntime != null ? "yes" : "no").append("; ");
-        // Try the actual command we'd use
+        sb.append("pv=").append(System.getenv("PRESSURE_VESSEL_RUNTIME") != null ? "yes" : "no").append("; ");
+        // Check host linker and library paths
+        String[] checkPaths = {
+            "/run/host/lib64/ld-linux-x86-64.so.2",
+            "/run/host/usr/lib64",
+            "/run/host/usr/bin/ffmpeg"
+        };
+        for (String p : checkPaths) {
+            sb.append(p.replace("/run/host/", "H:")).append("=").append(new java.io.File(p).exists()).append("; ");
+        }
+        // Try host linker approach
         try {
-            ProcessBuilder pb = new ProcessBuilder(buildCommand("ffmpeg", "-version"));
+            ProcessBuilder pb = new ProcessBuilder(
+                "/run/host/lib64/ld-linux-x86-64.so.2",
+                "--library-path", "/run/host/usr/lib64:/run/host/lib64:/run/host/usr/lib",
+                "/run/host/usr/bin/ffmpeg", "-version"
+            );
             pb.redirectErrorStream(true);
             Process p = pb.start();
             java.io.InputStream is = p.getInputStream();
-            byte[] buf = new byte[128];
+            byte[] buf = new byte[200];
             int n = is.read(buf);
             int exit = p.waitFor();
-            String out = n > 0 ? new String(buf, 0, Math.min(n, 60)).split("\n")[0] : "";
-            sb.append("exit=").append(exit).append("; output=").append(out);
+            String out = n > 0 ? new String(buf, 0, Math.min(n, 80)).split("\n")[0] : "";
+            sb.append("linker_exit=").append(exit).append("; out=").append(out);
         } catch (Exception e) {
-            sb.append("err=").append(e.getMessage());
+            sb.append("linker_err=").append(e.getMessage());
         }
         return sb.toString();
     }
