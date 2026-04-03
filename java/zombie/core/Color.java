@@ -848,50 +848,29 @@ implements Serializable {
 
     // === PZFB Convert — FFmpeg video conversion via ProcessBuilder ===
 
-    private static String _fbFFmpegPath = null;
-    private static String _fbFFprobePath = null;
+    // If true, we're inside a pressure-vessel container and must use flatpak-spawn --host
+    private static boolean _fbUseHostSpawn = false;
+    private static boolean _fbHostSpawnChecked = false;
 
-    private static String findExecutable(String name) {
-        // Try common absolute paths first (Steam/PZ may have a stripped PATH)
-        // Include /run/host/ prefixed paths for Steam pressure-vessel containers
-        String[] searchPaths = {
-            "/usr/bin/" + name,
-            "/run/host/usr/bin/" + name,
-            "/usr/local/bin/" + name,
-            "/run/host/usr/local/bin/" + name,
-            "/bin/" + name,
-            "/run/host/bin/" + name,
-            "/opt/homebrew/bin/" + name,
-            "/snap/bin/" + name,
-            System.getProperty("user.home") + "/bin/" + name,
-        };
-        for (String path : searchPaths) {
-            java.io.File f = new java.io.File(path);
-            if (f.exists() && f.canExecute()) return path;
+    private static boolean useHostSpawn() {
+        if (!_fbHostSpawnChecked) {
+            _fbHostSpawnChecked = true;
+            _fbUseHostSpawn = new java.io.File("/usr/bin/flatpak-spawn").exists()
+                && System.getenv("PRESSURE_VESSEL_RUNTIME") != null;
         }
-        // Windows common paths
-        String[] winPaths = {
-            "C:\\ffmpeg\\bin\\" + name + ".exe",
-            System.getenv("LOCALAPPDATA") != null ? System.getenv("LOCALAPPDATA") + "\\ffmpeg\\bin\\" + name + ".exe" : null,
-            System.getenv("ProgramFiles") != null ? System.getenv("ProgramFiles") + "\\ffmpeg\\bin\\" + name + ".exe" : null,
-        };
-        for (String path : winPaths) {
-            if (path == null) continue;
-            java.io.File f = new java.io.File(path);
-            if (f.exists() && f.canExecute()) return path;
-        }
-        // Fallback: try bare name (relies on PATH)
-        return name;
+        return _fbUseHostSpawn;
     }
 
-    private static String getFFmpegPath() {
-        if (_fbFFmpegPath == null) _fbFFmpegPath = findExecutable("ffmpeg");
-        return _fbFFmpegPath;
-    }
-
-    private static String getFFprobePath() {
-        if (_fbFFprobePath == null) _fbFFprobePath = findExecutable("ffprobe");
-        return _fbFFprobePath;
+    // Build a command array: if inside pressure-vessel, prefix with flatpak-spawn --host
+    private static String[] buildCommand(String... args) {
+        if (useHostSpawn()) {
+            String[] result = new String[args.length + 2];
+            result[0] = "/usr/bin/flatpak-spawn";
+            result[1] = "--host";
+            System.arraycopy(args, 0, result, 2, args.length);
+            return result;
+        }
+        return args;
     }
 
     private static volatile int _fbConvertStatus = 0; // 0=idle 1=running 2=done 3=error
@@ -920,13 +899,11 @@ implements Serializable {
                     String audioPath = outDir + java.io.File.separator + "audio.ogg";
 
                     // Convert video to raw RGBA
-                    String ffmpegCmd = getFFmpegPath();
-                    String ffprobeCmd = getFFprobePath();
-                    ProcessBuilder pb1 = new ProcessBuilder(
-                        ffmpegCmd, "-y", "-i", inPath,
+                    ProcessBuilder pb1 = new ProcessBuilder(buildCommand(
+                        "ffmpeg", "-y", "-i", inPath,
                         "-vf", "scale=" + w + ":" + h,
                         "-pix_fmt", "rgba", "-f", "rawvideo", rawPath
-                    );
+                    ));
                     pb1.redirectErrorStream(true);
                     Process p1 = pb1.start();
                     // Drain output to prevent blocking
@@ -943,10 +920,10 @@ implements Serializable {
                     // Extract audio (non-fatal if fails — video may have no audio)
                     boolean hasAudio = false;
                     try {
-                        ProcessBuilder pb2 = new ProcessBuilder(
-                            ffmpegCmd, "-y", "-i", inPath,
+                        ProcessBuilder pb2 = new ProcessBuilder(buildCommand(
+                            "ffmpeg", "-y", "-i", inPath,
                             "-vn", "-acodec", "libvorbis", "-q:a", "5", audioPath
-                        );
+                        ));
                         pb2.redirectErrorStream(true);
                         Process p2 = pb2.start();
                         java.io.InputStream is2 = p2.getInputStream();
@@ -958,10 +935,10 @@ implements Serializable {
                     // Get FPS via ffprobe
                     String fpsStr = "24";
                     try {
-                        ProcessBuilder pb3 = new ProcessBuilder(
-                            ffprobeCmd, "-v", "0", "-select_streams", "v",
+                        ProcessBuilder pb3 = new ProcessBuilder(buildCommand(
+                            "ffprobe", "-v", "0", "-select_streams", "v",
                             "-of", "csv=p=0", "-show_entries", "stream=r_frame_rate", inPath
-                        );
+                        ));
                         pb3.redirectErrorStream(true);
                         Process p3 = pb3.start();
                         java.io.BufferedReader br = new java.io.BufferedReader(
@@ -1026,8 +1003,7 @@ implements Serializable {
 
     public static boolean fbFFmpegAvailable() {
         try {
-            String ffmpeg = getFFmpegPath();
-            ProcessBuilder pb = new ProcessBuilder(ffmpeg, "-version");
+            ProcessBuilder pb = new ProcessBuilder(buildCommand("ffmpeg", "-version"));
             pb.redirectErrorStream(true);
             Process p = pb.start();
             java.io.InputStream is = p.getInputStream();
@@ -1042,30 +1018,22 @@ implements Serializable {
 
     public static String fbFFmpegDiag() {
         StringBuilder sb = new StringBuilder();
-        // Check if inside pressure-vessel container
+        sb.append("host_spawn=").append(useHostSpawn()).append("; ");
         String pvRuntime = System.getenv("PRESSURE_VESSEL_RUNTIME");
-        sb.append("pressure_vessel=").append(pvRuntime != null ? pvRuntime : "no").append("; ");
-        boolean hasRunHost = new java.io.File("/run/host/usr/bin").exists();
-        sb.append("run_host=").append(hasRunHost).append("; ");
-        // Test paths including /run/host (pressure-vessel host mount)
-        String[] testPaths = {
-            "/usr/bin/ffmpeg", "/run/host/usr/bin/ffmpeg",
-            "/usr/local/bin/ffmpeg", "/run/host/usr/local/bin/ffmpeg"
-        };
-        for (String p : testPaths) {
-            java.io.File f = new java.io.File(p);
-            if (f.exists()) sb.append(p).append(" FOUND; ");
-        }
-        sb.append("cached=").append(_fbFFmpegPath).append("; ");
-        _fbFFmpegPath = null;
-        sb.append("resolved=").append(getFFmpegPath()).append("; ");
-        // List what IS in /usr/bin (first 10)
-        java.io.File usrBin = new java.io.File("/usr/bin");
-        if (usrBin.exists()) {
-            String[] files = usrBin.list();
-            sb.append("usr_bin_count=").append(files != null ? files.length : 0).append("; ");
-        } else {
-            sb.append("usr_bin_missing; ");
+        sb.append("pv=").append(pvRuntime != null ? "yes" : "no").append("; ");
+        // Try the actual command we'd use
+        try {
+            ProcessBuilder pb = new ProcessBuilder(buildCommand("ffmpeg", "-version"));
+            pb.redirectErrorStream(true);
+            Process p = pb.start();
+            java.io.InputStream is = p.getInputStream();
+            byte[] buf = new byte[128];
+            int n = is.read(buf);
+            int exit = p.waitFor();
+            String out = n > 0 ? new String(buf, 0, Math.min(n, 60)).split("\n")[0] : "";
+            sb.append("exit=").append(exit).append("; output=").append(out);
+        } catch (Exception e) {
+            sb.append("err=").append(e.getMessage());
         }
         return sb.toString();
     }
