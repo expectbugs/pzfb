@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.2.0 (2026-04-03)
+
+- **Audio playback via FMOD direct** — bypasses PZ's sound bank system entirely
+  - `fbAudioLoad(path)` — load any audio file from any absolute path (OGG, WAV, MP3, etc.)
+  - `fbAudioPlay()` / `fbAudioStop()` — start/stop playback
+  - `fbAudioPause()` / `fbAudioResume()` — true pause/resume (freezes position)
+  - `fbAudioSeek(posMs)` — seek to position in milliseconds
+  - `fbAudioGetPosition()` / `fbAudioGetLength()` — query playback state
+  - `fbAudioSetVolume(vol)` — volume control (0.0–1.0)
+  - `fbAudioIsPlaying()` — check if audio is playing
+- **Video conversion via ffmpeg** — runs ffmpeg in a background thread via ProcessBuilder
+  - `fbConvertStart(input, outputDir, w, h)` — start async conversion
+  - `fbConvertStatus()` — poll: 0=idle, 1=running, 2=done, 3=error
+  - `fbConvertError()` / `fbConvertReset()` — error handling
+  - `fbFFmpegAvailable()` — detect if ffmpeg is on PATH
+- **Utility methods**
+  - `fbListDir(path)` — list files in a directory (newline-separated)
+  - `fbReadTextFile(path)` — read a small text file from any absolute path
+- **Test script:** `PZFB.TEST_DISABLED` flag allows dependent mods to reclaim test keybindings. Test keys remapped from INSERT/END to HOME/END.
+- Lua API wrappers for all new methods added to PZFBApi.lua
+- Class file count: 6 (was 5 in v1.1.0)
+
 ## 1.1.0 (2026-04-03)
 
 - Added `fbLoadRawFrame(tex, path, frameIndex)` — load a single frame from a concatenated raw RGBA file (for video playback, animations, etc.)

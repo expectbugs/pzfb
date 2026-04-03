@@ -1,5 +1,5 @@
 -- PZFB Test Script
--- INSERT: create framebuffer in a resizable window
+-- HOME: create framebuffer in a resizable window
 -- END: destroy framebuffer and close window
 
 require "PZFB/PZFBApi"
@@ -10,7 +10,7 @@ local fb = nil
 local fbWindow = nil
 
 -- Change these to remap the keys
-local KEY_CREATE = Keyboard.KEY_INSERT
+local KEY_CREATE = Keyboard.KEY_HOME
 local KEY_DESTROY = Keyboard.KEY_END
 
 -- ISPanel subclass that draws the framebuffer scaled to fit
@@ -121,6 +121,9 @@ function destroyFBWindow()
 end
 
 local function onKeyPressed(key)
+    -- Other mods (e.g. PZVP) can disable the test keys by setting this flag
+    if PZFB.TEST_DISABLED then return end
+
     if not PZFB.isAvailable() then
         if key == KEY_CREATE then
             print("[PZFB TEST] Not available — run install script and restart.")
@@ -136,4 +139,6 @@ local function onKeyPressed(key)
 end
 
 Events.OnKeyPressed.Add(onKeyPressed)
-print("[PZFB TEST] Keys: INSERT=create, END=destroy")
+if not PZFB.TEST_DISABLED then
+    print("[PZFB TEST] Keys: HOME=create, END=destroy")
+end

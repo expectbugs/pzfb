@@ -93,6 +93,8 @@ panel:releaseInput()
 
 ## API Reference
 
+### Framebuffer
+
 | Function | Returns | Description |
 |----------|---------|-------------|
 | `PZFB.isAvailable()` | `boolean` | Check if class files are deployed |
@@ -106,6 +108,38 @@ panel:releaseInput()
 | `PZFB.fileSize(path)` | `number` | Get file size in bytes (-1 if not found) |
 | `PZFB.getTexture(fb)` | `Texture\|nil` | Get PZ Texture for `drawTextureScaled()` |
 | `PZFB.destroy(fb)` | — | Free GL resources |
+
+### Audio (Direct FMOD — bypasses sound bank system)
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `PZFB.audioLoad(path)` | `boolean` | Load audio file from any absolute path |
+| `PZFB.audioPlay()` | `boolean` | Start playback from beginning |
+| `PZFB.audioPause()` | — | True pause (freezes position) |
+| `PZFB.audioResume()` | — | Resume from paused position |
+| `PZFB.audioStop()` | — | Stop and release audio |
+| `PZFB.audioSetVolume(vol)` | — | Set volume (0.0–1.0) |
+| `PZFB.audioSeek(posMs)` | — | Seek to position in milliseconds |
+| `PZFB.audioGetPosition()` | `number` | Current position in milliseconds |
+| `PZFB.audioGetLength()` | `number` | Total length in milliseconds |
+| `PZFB.audioIsPlaying()` | `boolean` | Check if audio is playing |
+
+### Video Conversion (ffmpeg)
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `PZFB.convertStart(input, outDir, w, h)` | `boolean` | Start async ffmpeg conversion |
+| `PZFB.convertStatus()` | `number` | 0=idle, 1=running, 2=done, 3=error |
+| `PZFB.convertError()` | `string` | Error message if status==3 |
+| `PZFB.convertReset()` | — | Reset status to idle |
+| `PZFB.ffmpegAvailable()` | `boolean` | Check if ffmpeg is on PATH |
+
+### Utilities
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `PZFB.listDir(path)` | `string` | List files in directory (newline-separated) |
+| `PZFB.readTextFile(path)` | `string` | Read text file from any absolute path |
 
 See [docs/API_REFERENCE.md](docs/API_REFERENCE.md) for full documentation.
 

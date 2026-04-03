@@ -124,3 +124,131 @@ function PZFB.destroy(fb)
     end
     fb.texture = nil
 end
+
+-- === Audio — Direct FMOD playback (bypasses sound bank system) ===
+
+--- Load an audio file for playback. Stops any previously loaded audio.
+--- @param path string absolute file path (OGG, WAV, MP3, etc.)
+--- @return boolean true if loaded successfully
+function PZFB.audioLoad(path)
+    if not PZFB.AVAILABLE then return false end
+    return Color.fbAudioLoad(path)
+end
+
+--- Start audio playback from the beginning.
+--- @return boolean true if playback started
+function PZFB.audioPlay()
+    if not PZFB.AVAILABLE then return false end
+    return Color.fbAudioPlay()
+end
+
+--- Pause audio playback (freezes position).
+function PZFB.audioPause()
+    if not PZFB.AVAILABLE then return end
+    Color.fbAudioPause()
+end
+
+--- Resume audio playback from paused position.
+function PZFB.audioResume()
+    if not PZFB.AVAILABLE then return end
+    Color.fbAudioResume()
+end
+
+--- Stop audio and release resources.
+function PZFB.audioStop()
+    if not PZFB.AVAILABLE then return end
+    Color.fbAudioStop()
+end
+
+--- Set audio volume.
+--- @param volume number 0.0 to 1.0
+function PZFB.audioSetVolume(volume)
+    if not PZFB.AVAILABLE then return end
+    Color.fbAudioSetVolume(volume)
+end
+
+--- Seek audio to a position in milliseconds.
+--- @param positionMs number position in milliseconds
+function PZFB.audioSeek(positionMs)
+    if not PZFB.AVAILABLE then return end
+    Color.fbAudioSeek(positionMs)
+end
+
+--- Get current audio playback position in milliseconds.
+--- @return number position in milliseconds
+function PZFB.audioGetPosition()
+    if not PZFB.AVAILABLE then return 0 end
+    return Color.fbAudioGetPosition()
+end
+
+--- Get total audio length in milliseconds.
+--- @return number length in milliseconds
+function PZFB.audioGetLength()
+    if not PZFB.AVAILABLE then return 0 end
+    return Color.fbAudioGetLength()
+end
+
+--- Check if audio is currently playing.
+--- @return boolean
+function PZFB.audioIsPlaying()
+    if not PZFB.AVAILABLE then return false end
+    return Color.fbAudioIsPlaying()
+end
+
+-- === Video Conversion (ffmpeg) ===
+
+--- Start async video conversion. Non-blocking.
+--- @param inputPath string absolute path to input video file
+--- @param outputDir string absolute path to output directory
+--- @param width number target width in pixels
+--- @param height number target height in pixels
+--- @return boolean true if conversion started
+function PZFB.convertStart(inputPath, outputDir, width, height)
+    if not PZFB.AVAILABLE then return false end
+    return Color.fbConvertStart(inputPath, outputDir, width, height)
+end
+
+--- Poll conversion status.
+--- @return number 0=idle, 1=running, 2=done, 3=error
+function PZFB.convertStatus()
+    if not PZFB.AVAILABLE then return 0 end
+    return Color.fbConvertStatus()
+end
+
+--- Get conversion error message.
+--- @return string error message, or empty string
+function PZFB.convertError()
+    if not PZFB.AVAILABLE then return "" end
+    return Color.fbConvertError()
+end
+
+--- Reset conversion status to idle.
+function PZFB.convertReset()
+    if not PZFB.AVAILABLE then return end
+    Color.fbConvertReset()
+end
+
+--- Check if ffmpeg is available on the system PATH.
+--- @return boolean
+function PZFB.ffmpegAvailable()
+    if not PZFB.AVAILABLE then return false end
+    return Color.fbFFmpegAvailable()
+end
+
+-- === Utilities ===
+
+--- List files in a directory.
+--- @param dirPath string absolute path to directory
+--- @return string newline-separated filenames, or empty string
+function PZFB.listDir(dirPath)
+    if not PZFB.AVAILABLE then return "" end
+    return Color.fbListDir(dirPath)
+end
+
+--- Read a text file and return its contents as a string.
+--- @param path string absolute file path
+--- @return string file contents, or empty string if file doesn't exist
+function PZFB.readTextFile(path)
+    if not PZFB.AVAILABLE then return "" end
+    return Color.fbReadTextFile(path)
+end

@@ -611,7 +611,7 @@ implements Serializable {
 
     private static final java.util.concurrent.ConcurrentHashMap<zombie.core.textures.Texture, Boolean> _fbState =
         new java.util.concurrent.ConcurrentHashMap<>();
-    private static final String PZFB_VERSION = "1.1.0";
+    private static final String PZFB_VERSION = "1.2.0";
 
     public static String fbPing() {
         return "PZFB " + PZFB_VERSION;
@@ -748,5 +748,280 @@ implements Serializable {
             });
         }
     }
+    // === PZFB Audio — Direct FMOD playback (bypasses sound bank system) ===
+
+    private static long _fbAudioSound = 0;
+    private static long _fbAudioChannel = 0;
+
+    public static boolean fbAudioLoad(String path) {
+        fbAudioStop();
+        try {
+            java.io.File f = new java.io.File(path);
+            if (!f.exists()) return false;
+            // flags: FMOD_LOOP_OFF(0x1) | FMOD_2D(0x8) | FMOD_CREATESTREAM(0x80) = 0x89
+            long sound = fmod.javafmod.FMOD_System_CreateSound(path, 0x89);
+            if (sound == 0) return false;
+            _fbAudioSound = sound;
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    public static boolean fbAudioPlay() {
+        if (_fbAudioSound == 0) return false;
+        try {
+            if (_fbAudioChannel != 0) {
+                try { fmod.javafmod.FMOD_Channel_Stop(_fbAudioChannel); } catch (Exception ignore) {}
+                _fbAudioChannel = 0;
+            }
+            long channel = fmod.javafmod.FMOD_System_PlaySound(_fbAudioSound, false);
+            if (channel == 0) return false;
+            _fbAudioChannel = channel;
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    public static void fbAudioPause() {
+        if (_fbAudioChannel != 0) {
+            try { fmod.javafmod.FMOD_Channel_SetPaused(_fbAudioChannel, true); } catch (Exception ignore) {}
+        }
+    }
+
+    public static void fbAudioResume() {
+        if (_fbAudioChannel != 0) {
+            try { fmod.javafmod.FMOD_Channel_SetPaused(_fbAudioChannel, false); } catch (Exception ignore) {}
+        }
+    }
+
+    public static void fbAudioStop() {
+        if (_fbAudioChannel != 0) {
+            try { fmod.javafmod.FMOD_Channel_Stop(_fbAudioChannel); } catch (Exception ignore) {}
+            _fbAudioChannel = 0;
+        }
+        if (_fbAudioSound != 0) {
+            try { fmod.javafmod.FMOD_Sound_Release(_fbAudioSound); } catch (Exception ignore) {}
+            _fbAudioSound = 0;
+        }
+    }
+
+    public static void fbAudioSetVolume(float volume) {
+        if (_fbAudioChannel != 0) {
+            try { fmod.javafmod.FMOD_Channel_SetVolume(_fbAudioChannel, volume); } catch (Exception ignore) {}
+        }
+    }
+
+    public static void fbAudioSeek(long positionMs) {
+        if (_fbAudioChannel != 0) {
+            try { fmod.javafmod.FMOD_Channel_SetPosition(_fbAudioChannel, positionMs); } catch (Exception ignore) {}
+        }
+    }
+
+    public static long fbAudioGetPosition() {
+        if (_fbAudioChannel == 0) return 0;
+        try {
+            return fmod.javafmod.FMOD_Channel_GetPosition(_fbAudioChannel, 1); // FMOD_TIMEUNIT_MS
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    public static long fbAudioGetLength() {
+        if (_fbAudioSound == 0) return 0;
+        try {
+            return fmod.javafmod.FMOD_Sound_GetLength(_fbAudioSound, 1); // FMOD_TIMEUNIT_MS
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    public static boolean fbAudioIsPlaying() {
+        if (_fbAudioChannel == 0) return false;
+        try {
+            return fmod.javafmod.FMOD_Channel_IsPlaying(_fbAudioChannel);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    // === PZFB Convert — FFmpeg video conversion via ProcessBuilder ===
+
+    private static volatile int _fbConvertStatus = 0; // 0=idle 1=running 2=done 3=error
+    private static volatile String _fbConvertError = "";
+
+    public static boolean fbConvertStart(String inputPath, String outputDir, int width, int height) {
+        if (_fbConvertStatus == 1) return false;
+        java.io.File inFile = new java.io.File(inputPath);
+        if (!inFile.exists()) {
+            _fbConvertError = "Input file not found: " + inputPath;
+            _fbConvertStatus = 3;
+            return false;
+        }
+        _fbConvertStatus = 1;
+        _fbConvertError = "";
+        final String inPath = inputPath;
+        final String outDir = outputDir;
+        final int w = width;
+        final int h = height;
+        new Thread(new Runnable() {
+            public void run() {
+                try {
+                    java.io.File dir = new java.io.File(outDir);
+                    dir.mkdirs();
+                    String rawPath = outDir + java.io.File.separator + "video.raw";
+                    String audioPath = outDir + java.io.File.separator + "audio.ogg";
+
+                    // Convert video to raw RGBA
+                    ProcessBuilder pb1 = new ProcessBuilder(
+                        "ffmpeg", "-y", "-i", inPath,
+                        "-vf", "scale=" + w + ":" + h,
+                        "-pix_fmt", "rgba", "-f", "rawvideo", rawPath
+                    );
+                    pb1.redirectErrorStream(true);
+                    Process p1 = pb1.start();
+                    // Drain output to prevent blocking
+                    java.io.InputStream is1 = p1.getInputStream();
+                    byte[] drain = new byte[4096];
+                    while (is1.read(drain) != -1) {}
+                    int exit1 = p1.waitFor();
+                    if (exit1 != 0) {
+                        _fbConvertError = "ffmpeg video conversion failed (exit " + exit1 + ")";
+                        _fbConvertStatus = 3;
+                        return;
+                    }
+
+                    // Extract audio (non-fatal if fails — video may have no audio)
+                    boolean hasAudio = false;
+                    try {
+                        ProcessBuilder pb2 = new ProcessBuilder(
+                            "ffmpeg", "-y", "-i", inPath,
+                            "-vn", "-acodec", "libvorbis", "-q:a", "5", audioPath
+                        );
+                        pb2.redirectErrorStream(true);
+                        Process p2 = pb2.start();
+                        java.io.InputStream is2 = p2.getInputStream();
+                        while (is2.read(drain) != -1) {}
+                        int exit2 = p2.waitFor();
+                        hasAudio = (exit2 == 0) && new java.io.File(audioPath).length() > 0;
+                    } catch (Exception ignore) {}
+
+                    // Get FPS via ffprobe
+                    String fpsStr = "24";
+                    try {
+                        ProcessBuilder pb3 = new ProcessBuilder(
+                            "ffprobe", "-v", "0", "-select_streams", "v",
+                            "-of", "csv=p=0", "-show_entries", "stream=r_frame_rate", inPath
+                        );
+                        pb3.redirectErrorStream(true);
+                        Process p3 = pb3.start();
+                        java.io.BufferedReader br = new java.io.BufferedReader(
+                            new java.io.InputStreamReader(p3.getInputStream())
+                        );
+                        String line = br.readLine();
+                        p3.waitFor();
+                        if (line != null && !line.trim().isEmpty()) {
+                            // May have multiple streams, take first; may be "24000/1001"
+                            String raw = line.trim().split(",")[0].trim();
+                            if (raw.contains("/")) {
+                                String[] parts = raw.split("/");
+                                double num = Double.parseDouble(parts[0]);
+                                double den = Double.parseDouble(parts[1]);
+                                if (den > 0) fpsStr = String.valueOf(num / den);
+                            } else {
+                                fpsStr = raw;
+                            }
+                        }
+                    } catch (Exception ignore) {}
+
+                    // Calculate frame count
+                    java.io.File rawFile = new java.io.File(rawPath);
+                    long frames = rawFile.length() / ((long) w * h * 4);
+
+                    // Write meta.txt
+                    java.io.FileWriter fw = new java.io.FileWriter(
+                        outDir + java.io.File.separator + "meta.txt"
+                    );
+                    fw.write("width=" + w + "\n");
+                    fw.write("height=" + h + "\n");
+                    fw.write("frames=" + frames + "\n");
+                    fw.write("fps=" + fpsStr + "\n");
+                    fw.write("audio=" + (hasAudio ? audioPath : "") + "\n");
+                    fw.write("raw=" + rawPath + "\n");
+                    fw.close();
+
+                    _fbConvertStatus = 2;
+                } catch (Exception e) {
+                    _fbConvertError = e.getMessage();
+                    _fbConvertStatus = 3;
+                }
+            }
+        }).start();
+        return true;
+    }
+
+    public static int fbConvertStatus() {
+        return _fbConvertStatus;
+    }
+
+    public static String fbConvertError() {
+        return _fbConvertError;
+    }
+
+    public static void fbConvertReset() {
+        if (_fbConvertStatus != 1) {
+            _fbConvertStatus = 0;
+            _fbConvertError = "";
+        }
+    }
+
+    public static boolean fbFFmpegAvailable() {
+        try {
+            ProcessBuilder pb = new ProcessBuilder("ffmpeg", "-version");
+            pb.redirectErrorStream(true);
+            Process p = pb.start();
+            java.io.InputStream is = p.getInputStream();
+            byte[] drain = new byte[4096];
+            while (is.read(drain) != -1) {}
+            int exit = p.waitFor();
+            return exit == 0;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    // === PZFB Utilities ===
+
+    public static String fbListDir(String dirPath) {
+        try {
+            java.io.File dir = new java.io.File(dirPath);
+            if (!dir.exists() || !dir.isDirectory()) return "";
+            java.io.File[] files = dir.listFiles();
+            if (files == null || files.length == 0) return "";
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < files.length; i++) {
+                if (files[i].isFile()) {
+                    if (sb.length() > 0) sb.append("\n");
+                    sb.append(files[i].getName());
+                }
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    public static String fbReadTextFile(String path) {
+        try {
+            java.io.File f = new java.io.File(path);
+            if (!f.exists()) return "";
+            byte[] data = java.nio.file.Files.readAllBytes(f.toPath());
+            return new String(data, java.nio.charset.StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
     // === END PZFB EXTENSION ===
 }

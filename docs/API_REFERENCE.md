@@ -172,6 +172,200 @@ Destroy a framebuffer and free its GL resources.
 
 ---
 
+## Audio Playback (Direct FMOD)
+
+Bypasses PZ's sound bank system entirely. Load and play any audio file from any absolute path — no script registration, no `media/sound/` directory required. Supports true pause/resume and seeking.
+
+**Note:** One audio track at a time. Loading a new file releases the previous one.
+
+### `PZFB.audioLoad(path)`
+
+Load an audio file for playback.
+
+- **Parameters:**
+  - `path` (string) — absolute file path (OGG, WAV, MP3, FLAC — anything FMOD supports)
+- **Returns:** `boolean` — true if loaded successfully
+- **Note:** Stops and releases any previously loaded audio.
+
+```lua
+PZFB.audioLoad("/home/user/Zomboid/PZVP/converted/myvideo/audio.ogg")
+```
+
+### `PZFB.audioPlay()`
+
+Start playback from the beginning.
+
+- **Returns:** `boolean` — true if playback started
+
+### `PZFB.audioPause()`
+
+Pause playback. Position is preserved — call `audioResume()` to continue.
+
+### `PZFB.audioResume()`
+
+Resume playback from the paused position.
+
+### `PZFB.audioStop()`
+
+Stop playback and release the audio resource.
+
+### `PZFB.audioSetVolume(volume)`
+
+Set playback volume.
+
+- **Parameters:**
+  - `volume` (number) — 0.0 (silent) to 1.0 (full volume)
+
+### `PZFB.audioSeek(positionMs)`
+
+Seek to a position in milliseconds.
+
+- **Parameters:**
+  - `positionMs` (number) — target position in milliseconds
+
+### `PZFB.audioGetPosition()`
+
+Get the current playback position.
+
+- **Returns:** `number` — current position in milliseconds
+
+### `PZFB.audioGetLength()`
+
+Get the total audio length.
+
+- **Returns:** `number` — total length in milliseconds
+
+### `PZFB.audioIsPlaying()`
+
+Check if audio is currently playing.
+
+- **Returns:** `boolean`
+
+### Audio Example
+
+```lua
+-- Load and play audio synced with video
+PZFB.audioLoad("/path/to/audio.ogg")
+PZFB.audioPlay()
+PZFB.audioSetVolume(0.8)
+
+-- Pause/resume
+PZFB.audioPause()
+PZFB.audioResume()
+
+-- Seek to 5 seconds
+PZFB.audioSeek(5000)
+
+-- Check status
+local pos = PZFB.audioGetPosition()    -- e.g. 5000
+local len = PZFB.audioGetLength()      -- e.g. 30000
+local playing = PZFB.audioIsPlaying()  -- true/false
+
+-- Clean up
+PZFB.audioStop()
+```
+
+---
+
+## Video Conversion (ffmpeg)
+
+Convert video files to raw RGBA frames + OGG audio using ffmpeg, running in a background thread. Non-blocking — poll `convertStatus()` to check progress.
+
+**Requires:** ffmpeg and ffprobe on the system PATH.
+
+### `PZFB.convertStart(inputPath, outputDir, width, height)`
+
+Start an asynchronous video conversion.
+
+- **Parameters:**
+  - `inputPath` (string) — absolute path to source video (MP4, AVI, MKV, etc.)
+  - `outputDir` (string) — absolute path to output directory (created if needed)
+  - `width` (number) — target width in pixels
+  - `height` (number) — target height in pixels
+- **Returns:** `boolean` — true if conversion started, false if already running or file not found
+- **Output files:**
+  - `video.raw` — concatenated raw RGBA frames (use with `loadRawFrame()`)
+  - `audio.ogg` — extracted audio track (if source has audio)
+  - `meta.txt` — metadata (width, height, frames, fps, file paths)
+
+### `PZFB.convertStatus()`
+
+Poll the conversion status.
+
+- **Returns:** `number` — 0=idle, 1=running, 2=done, 3=error
+
+### `PZFB.convertError()`
+
+Get the error message from a failed conversion.
+
+- **Returns:** `string` — error message, or empty string
+
+### `PZFB.convertReset()`
+
+Reset the conversion status back to idle. Only works when not currently converting.
+
+### `PZFB.ffmpegAvailable()`
+
+Check if ffmpeg is available on the system PATH.
+
+- **Returns:** `boolean`
+
+### Conversion Example
+
+```lua
+-- Check ffmpeg first
+if not PZFB.ffmpegAvailable() then
+    print("ffmpeg not found!")
+    return
+end
+
+-- Start conversion
+PZFB.convertStart("/path/to/video.mp4", "/output/dir", 256, 192)
+
+-- Poll in OnTick or render
+local status = PZFB.convertStatus()
+if status == 1 then
+    -- still converting...
+elseif status == 2 then
+    -- done! Load the video
+    PZFB.convertReset()
+elseif status == 3 then
+    print("Error: " .. PZFB.convertError())
+    PZFB.convertReset()
+end
+```
+
+---
+
+## Utilities
+
+### `PZFB.listDir(dirPath)`
+
+List files in a directory.
+
+- **Parameters:**
+  - `dirPath` (string) — absolute path to directory
+- **Returns:** `string` — newline-separated filenames (files only, not subdirectories), or empty string if directory doesn't exist
+
+```lua
+local files = PZFB.listDir("/home/user/Zomboid/PZVP")
+-- "video1.mp4\nvideo2.avi\n..."
+```
+
+### `PZFB.readTextFile(path)`
+
+Read a text file and return its contents as a string. Useful for reading metadata files from any location (not restricted to `~/Zomboid/Lua/` like `getFileReader`).
+
+- **Parameters:**
+  - `path` (string) — absolute file path
+- **Returns:** `string` — file contents (UTF-8), or empty string if file doesn't exist
+
+```lua
+local meta = PZFB.readTextFile("/path/to/meta.txt")
+```
+
+---
+
 ## Input Capture
 
 ```lua

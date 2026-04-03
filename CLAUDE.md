@@ -99,23 +99,9 @@ cp out/zombie/core/Color*.class "$PZ/zombie/core/"
 rm -f "$PZ/zombie/core/Color"*.class
 ```
 
-## Lua API (v1.0.0)
+## Lua API (v1.2.0)
 
-### Low-level (Color.fb* static methods):
-```lua
-Color.fbPing()                        -- Returns "PZFB 1.1.0"
-Color.fbVersion()                     -- Returns "1.1.0"
-Color.fbCreate(width, height)         -- Returns Texture (NEAREST filtering)
-Color.fbCreateLinear(width, height)   -- Returns Texture (LINEAR filtering)
-Color.fbIsReady(tex)                  -- Per-texture readiness check
-Color.fbFill(tex, r, g, b, a)        -- Fills solid color (0-255 each)
-Color.fbLoadRaw(tex, path)            -- Loads raw RGBA file, returns boolean
-Color.fbLoadRawFrame(tex, path, idx)  -- Loads frame idx from concatenated raw file
-Color.fbFileSize(path)                -- Returns file size in bytes (long), or -1
-Color.fbDestroy(tex)                  -- Frees GL resources
-```
-
-### High-level (recommended — `require "PZFB/PZFBApi"`):
+### Framebuffer (Color.fb* static methods / PZFB.* wrappers):
 ```lua
 PZFB.isAvailable()                    -- Class files deployed?
 PZFB.create(w, h) / createLinear(w,h) -- Returns fb handle table
@@ -126,6 +112,34 @@ PZFB.loadRawFrame(fb, path, idx)      -- Load frame from concatenated raw file
 PZFB.fileSize(path)                   -- Get file size in bytes
 PZFB.getTexture(fb)                   -- Get Texture for drawing
 PZFB.destroy(fb)                      -- Clean up
+```
+
+### Audio (direct FMOD — bypasses sound bank system):
+```lua
+PZFB.audioLoad(path)                  -- Load any audio file from absolute path
+PZFB.audioPlay()                      -- Start playback
+PZFB.audioPause() / audioResume()     -- True pause/resume
+PZFB.audioStop()                      -- Stop and release
+PZFB.audioSetVolume(vol)              -- 0.0–1.0
+PZFB.audioSeek(posMs)                 -- Seek to millisecond position
+PZFB.audioGetPosition()               -- Current position in ms
+PZFB.audioGetLength()                 -- Total length in ms
+PZFB.audioIsPlaying()                 -- Boolean
+```
+
+### Video conversion (ffmpeg via ProcessBuilder, async):
+```lua
+PZFB.convertStart(input, outDir, w, h) -- Start background conversion
+PZFB.convertStatus()                   -- 0=idle, 1=running, 2=done, 3=error
+PZFB.convertError()                    -- Error message string
+PZFB.convertReset()                    -- Reset to idle
+PZFB.ffmpegAvailable()                 -- Is ffmpeg on PATH?
+```
+
+### Utilities:
+```lua
+PZFB.listDir(path)                     -- Newline-separated filenames
+PZFB.readTextFile(path)                -- Read text file from any path
 ```
 
 ## B42 PZ Lua Sandbox Limitations
