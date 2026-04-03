@@ -31,18 +31,29 @@
 ```
 ~/pzfb/
 ├── CLAUDE.md              # This file
+├── README.md              # Public-facing documentation
+├── CHANGELOG.md           # Version history
+├── LICENSE                # MIT
+├── build.sh               # Compile + package
+├── install.sh / .bat      # Deploy class files to PZ
+├── uninstall.sh / .bat    # Remove class files
 ├── docs/
-│   └── TECHNICAL.md       # Complete technical documentation (READ THIS FIRST)
-├── java/
-│   └── zombie/core/
-│       └── Color.java     # Patched Color class source
-├── mod/                   # PZ mod (Lua side)
-│   └── PZFB/
-│       ├── 42/
-│       │   ├── mod.info
-│       │   └── media/lua/client/
-│       └── common/
-└── tools/                 # Build scripts, test utilities
+│   ├── TECHNICAL.md       # Complete technical docs (READ THIS FIRST)
+│   ├── API_REFERENCE.md   # Full Lua API docs
+│   └── test_framebuffer.lua
+├── java/zombie/core/
+│   └── Color.java         # Patched Color class source
+├── build/                 # Compiled output (git-ignored)
+├── class_files/           # Distribution .class files (Color + 3 inner)
+└── mod/PZFB/
+    ├── common/            # Required empty dir for B42
+    └── 42/
+        ├── mod.info       # B42 mod metadata
+        ├── poster.png / icon.png
+        └── media/lua/client/PZFB/
+            ├── PZFBInit.lua   # Startup detection + error UI
+            ├── PZFBApi.lua    # Public API
+            └── PZFBInput.lua  # Input capture module
 ```
 
 ## The Core Technique
@@ -60,8 +71,8 @@ We replace `zombie.core.Color` (a Kahlua-whitelisted Java class) with a version 
 5. **PZ's UI `render()` also runs on MainThread** — PZ's own draw methods (`drawTextureScaled` etc.) queue commands to SpriteRenderer, they don't call GL directly.
 6. **`Texture.setData(ByteBuffer)` crashes from Lua** — it calls `glTexSubImage2D` on the wrong thread.
 7. **`Texture.getData()` crashes from Lua** — cause unknown, crashes immediately on any texture.
-8. **Anonymous inner classes** compile to `Color$1.class`, `Color$2.class`, etc. ALL must be deployed.
-9. **Reflection works** — we use it to set private `TextureID` fields (id, width, height, widthHw, heightHw).
+8. **Anonymous inner classes** compile to `Color$1.class`, `Color$2.class`, `Color$3.class`. ALL must be deployed.
+9. **No reflection needed** — `TextureID.getID()` is public. PZ's own Texture constructor handles GL allocation; we just read the id and upload pixels via `glTexSubImage2D`.
 10. **The decompiled Color.class recompiles cleanly** via CFR decompiler + Java 25 javac. No modifications needed to the original methods.
 
 ## Build Process
@@ -88,16 +99,29 @@ cp out/zombie/core/Color*.class "$PZ/zombie/core/"
 rm -f "$PZ/zombie/core/Color"*.class
 ```
 
-## Lua API (Current)
+## Lua API (v1.0.0)
 
+### Low-level (Color.fb* static methods):
 ```lua
-Color.fbPing()                        -- Returns string, verifies patch loaded
-Color.fbCreate(width, height)         -- Returns Texture, queues GL init
-Color.fbIsReady()                     -- Returns boolean, true when GL init done
+Color.fbPing()                        -- Returns "PZFB 1.0.0"
+Color.fbVersion()                     -- Returns "1.0.0"
+Color.fbCreate(width, height)         -- Returns Texture (NEAREST filtering)
+Color.fbCreateLinear(width, height)   -- Returns Texture (LINEAR filtering)
+Color.fbIsReady(tex)                  -- Per-texture readiness check
 Color.fbFill(tex, r, g, b, a)        -- Fills solid color (0-255 each)
 Color.fbLoadRaw(tex, path)            -- Loads raw RGBA file, returns boolean
--- Draw in UI panel render():
-self:drawTextureScaled(tex, x, y, w, h, 1, 1, 1, 1)
+Color.fbDestroy(tex)                  -- Frees GL resources
+```
+
+### High-level (recommended — `require "PZFB/PZFBApi"`):
+```lua
+PZFB.isAvailable()                    -- Class files deployed?
+PZFB.create(w, h) / createLinear(w,h) -- Returns fb handle table
+PZFB.isReady(fb)                      -- GL texture ready?
+PZFB.fill(fb, r, g, b, a)            -- Fill solid color
+PZFB.loadRaw(fb, path)               -- Load raw RGBA file
+PZFB.getTexture(fb)                   -- Get Texture for drawing
+PZFB.destroy(fb)                      -- Clean up
 ```
 
 ## B42 PZ Lua Sandbox Limitations

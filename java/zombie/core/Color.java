@@ -604,95 +604,58 @@ implements Serializable {
         }
     }
 
-    // === RT-ZOMBOID FRAMEBUFFER EXTENSION ===
-    // All GL calls dispatched via RenderThread.invokeOnRenderContext()
+    // === PZFB — Video Framebuffer Extension ===
+    // Multi-framebuffer support. All GL calls via RenderThread.queueInvokeOnRenderContext().
+    // No reflection. No manual glGenTextures. Uses PZ's own Texture GL allocation.
+    // Thread-safe: fresh ByteBuffer per update (copy-on-queue).
 
-    private static java.nio.ByteBuffer _fbBuffer;
-    private static int _fbW;
-    private static int _fbH;
-    private static int _fbGlId = -1;
-    private static volatile boolean _fbReady = false;
+    private static final java.util.concurrent.ConcurrentHashMap<zombie.core.textures.Texture, Boolean> _fbState =
+        new java.util.concurrent.ConcurrentHashMap<>();
+    private static final String PZFB_VERSION = "1.0.0";
 
     public static String fbPing() {
-        return "RT-Zomboid FrameBuffer active!";
+        return "PZFB " + PZFB_VERSION;
+    }
+
+    public static String fbVersion() {
+        return PZFB_VERSION;
     }
 
     public static zombie.core.textures.Texture fbCreate(int width, int height) {
-        _fbW = width;
-        _fbH = height;
-        _fbReady = false;
-        _fbGlId = -1;
-        _fbBuffer = java.nio.ByteBuffer.allocateDirect(width * height * 4);
-        // Fill black
-        for (int i = 0; i < width * height; i++) {
-            _fbBuffer.put((byte) 0);
-            _fbBuffer.put((byte) 0);
-            _fbBuffer.put((byte) 0);
-            _fbBuffer.put((byte) 255);
-        }
-        _fbBuffer.flip();
-
-        // Create PZ Texture wrapper
-        zombie.core.textures.Texture tex = new zombie.core.textures.Texture(width, height, 0);
-
-        // Dispatch GL allocation to render thread
-        zombie.core.opengl.RenderThread.queueInvokeOnRenderContext(new Runnable() {
-            public void run() {
-                try {
-                    int glId = org.lwjgl.opengl.GL11.glGenTextures();
-                    org.lwjgl.opengl.GL11.glBindTexture(0x0DE1, glId);
-                    _fbBuffer.rewind();
-                    org.lwjgl.opengl.GL11.glTexImage2D(
-                        0x0DE1, 0, 0x1908, _fbW, _fbH, 0, 0x1908, 0x1401, _fbBuffer
-                    );
-                    org.lwjgl.opengl.GL11.glTexParameteri(0x0DE1, 0x2801, 0x2600);
-                    org.lwjgl.opengl.GL11.glTexParameteri(0x0DE1, 0x2800, 0x2600);
-                    _fbGlId = glId;
-
-                    // Set GL id on TextureID via reflection
-                    zombie.core.textures.TextureID tid = tex.getTextureId();
-                    java.lang.reflect.Field f;
-                    f = zombie.core.textures.TextureID.class.getDeclaredField("id");
-                    f.setAccessible(true); f.setInt(tid, glId);
-                    f = zombie.core.textures.TextureID.class.getDeclaredField("width");
-                    f.setAccessible(true); f.setInt(tid, _fbW);
-                    f = zombie.core.textures.TextureID.class.getDeclaredField("height");
-                    f.setAccessible(true); f.setInt(tid, _fbH);
-                    f = zombie.core.textures.TextureID.class.getDeclaredField("widthHw");
-                    f.setAccessible(true); f.setInt(tid, _fbW);
-                    f = zombie.core.textures.TextureID.class.getDeclaredField("heightHw");
-                    f.setAccessible(true); f.setInt(tid, _fbH);
-
-                    _fbReady = true;
-                } catch (Exception e) {
-                    _fbGlId = -1;
-                    _fbReady = false;
-                }
-            }
-        });
-
+        // flags=3: bit 0 = min nearest, bit 1 = mag nearest (pixel-perfect for emulators)
+        zombie.core.textures.Texture tex = new zombie.core.textures.Texture(width, height, 3);
+        _fbState.put(tex, Boolean.TRUE);
         return tex;
     }
 
-    public static boolean fbIsReady() {
-        return _fbReady;
+    public static zombie.core.textures.Texture fbCreateLinear(int width, int height) {
+        // flags=0: linear filtering (smoother, better for video playback)
+        zombie.core.textures.Texture tex = new zombie.core.textures.Texture(width, height, 0);
+        _fbState.put(tex, Boolean.TRUE);
+        return tex;
     }
 
-    public static void fbFill(zombie.core.textures.Texture t, int r, int g, int b, int a) {
-        if (!_fbReady || _fbBuffer == null || _fbGlId == -1) return;
-        _fbBuffer.clear();
-        for (int i = 0; i < _fbW * _fbH; i++) {
-            _fbBuffer.put((byte) r);
-            _fbBuffer.put((byte) g);
-            _fbBuffer.put((byte) b);
-            _fbBuffer.put((byte) a);
-        }
-        _fbBuffer.flip();
+    public static boolean fbIsReady(zombie.core.textures.Texture tex) {
+        if (tex == null) return false;
+        if (!Boolean.TRUE.equals(_fbState.get(tex))) return false;
+        // TextureID.getID() returns -1 until the render thread allocates the GL texture.
+        // The Texture constructor queues GL allocation; our check runs after.
+        return tex.getTextureId().getID() != -1;
+    }
 
-        final java.nio.ByteBuffer buf = _fbBuffer;
-        final int glId = _fbGlId;
-        final int w = _fbW;
-        final int h = _fbH;
+    public static void fbFill(zombie.core.textures.Texture tex, int r, int g, int b, int a) {
+        if (!fbIsReady(tex)) return;
+        final int w = tex.getWidth();
+        final int h = tex.getHeight();
+        final java.nio.ByteBuffer buf = java.nio.ByteBuffer.allocateDirect(w * h * 4);
+        for (int i = 0; i < w * h; i++) {
+            buf.put((byte) r);
+            buf.put((byte) g);
+            buf.put((byte) b);
+            buf.put((byte) a);
+        }
+        buf.flip();
+        final int glId = tex.getTextureId().getID();
         zombie.core.opengl.RenderThread.queueInvokeOnRenderContext(new Runnable() {
             public void run() {
                 org.lwjgl.opengl.GL11.glBindTexture(0x0DE1, glId);
@@ -703,21 +666,19 @@ implements Serializable {
         });
     }
 
-    public static boolean fbLoadRaw(zombie.core.textures.Texture t, String path) {
-        if (!_fbReady || _fbGlId == -1) return false;
+    public static boolean fbLoadRaw(zombie.core.textures.Texture tex, String path) {
+        if (!fbIsReady(tex)) return false;
         try {
             java.io.File file = new java.io.File(path);
             if (!file.exists()) return false;
+            final int w = tex.getWidth();
+            final int h = tex.getHeight();
             byte[] data = java.nio.file.Files.readAllBytes(file.toPath());
-            if (data.length != _fbW * _fbH * 4) return false;
-            _fbBuffer.clear();
-            _fbBuffer.put(data);
-            _fbBuffer.flip();
-
-            final java.nio.ByteBuffer buf = _fbBuffer;
-            final int glId = _fbGlId;
-            final int w = _fbW;
-            final int h = _fbH;
+            if (data.length != w * h * 4) return false;
+            final java.nio.ByteBuffer buf = java.nio.ByteBuffer.allocateDirect(w * h * 4);
+            buf.put(data);
+            buf.flip();
+            final int glId = tex.getTextureId().getID();
             zombie.core.opengl.RenderThread.queueInvokeOnRenderContext(new Runnable() {
                 public void run() {
                     org.lwjgl.opengl.GL11.glBindTexture(0x0DE1, glId);
@@ -731,5 +692,17 @@ implements Serializable {
             return false;
         }
     }
-    // === END RT-ZOMBOID EXTENSION ===
+
+    public static void fbDestroy(zombie.core.textures.Texture tex) {
+        if (tex == null) return;
+        _fbState.remove(tex);
+        if (tex.getTextureId().getID() != -1) {
+            zombie.core.opengl.RenderThread.queueInvokeOnRenderContext(new Runnable() {
+                public void run() {
+                    tex.getTextureId().destroy();
+                }
+            });
+        }
+    }
+    // === END PZFB EXTENSION ===
 }

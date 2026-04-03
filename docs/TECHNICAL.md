@@ -14,31 +14,36 @@ PZ's Lua VM (Kahlua) can create Texture objects and draw them, but cannot write 
 
 We replace `zombie.core.Color` (a whitelisted Java class exposed to Kahlua) with a patched version that adds static methods for framebuffer operations. These methods use `RenderThread.queueInvokeOnRenderContext(Runnable)` to dispatch all OpenGL calls to the correct thread.
 
-### The Pipeline
+### The Pipeline (v1.0)
 
 ```
 1. Lua calls Color.fbCreate(width, height)
-   → Java allocates a ByteBuffer (width * height * 4 bytes, RGBA)
-   → Java creates a Texture(width, height, 0) wrapper
-   → Java queues GL work to render thread:
-       - glGenTextures() → allocates GPU texture
-       - glBindTexture(GL_TEXTURE_2D, id)
-       - glTexImage2D(..., buffer) → uploads initial pixel data
-       - glTexParameteri(..., NEAREST filtering)
-       - Reflection sets GL id + dimensions on PZ's TextureID
-   → Returns Texture to Lua
+   → Java creates Texture(width, height, 3) — PZ allocates GL texture on render thread
+   → Texture is registered in ConcurrentHashMap for tracking
+   → Returns Texture to Lua immediately (GL init is async)
 
-2. Lua calls Color.fbFill(texture, r, g, b, a) — OR — Color.fbLoadRaw(texture, path)
-   → Java fills ByteBuffer with pixel data (solid color or from file)
-   → Java queues GL work to render thread:
-       - glBindTexture(GL_TEXTURE_2D, id)
-       - glTexSubImage2D(..., buffer) → uploads new pixel data
+2. Lua polls Color.fbIsReady(texture)
+   → Checks TextureID.getID() != -1 (render thread has allocated the GL texture)
+   → No reflection needed — getID() is public
 
-3. Lua draws in a UI panel's render() method:
+3. Lua calls Color.fbFill(texture, r, g, b, a) — OR — Color.fbLoadRaw(texture, path)
+   → Java allocates a FRESH ByteBuffer (copy-on-queue, thread-safe)
+   → Fills buffer with pixel data (solid color or from file)
+   → Reads GL id via texture.getTextureId().getID()
+   → Queues glBindTexture + glTexSubImage2D on render thread
+
+4. Lua draws in a UI panel's render() method:
    → self:drawTextureScaled(texture, x, y, w, h, 1, 1, 1, 1)
    → PZ queues this through its SpriteRenderer
    → Render thread draws the texture
 ```
+
+### Key improvements over PoC
+- **No reflection** — uses TextureID.getID() (public method) instead of reflective field access
+- **No GL leak** — uses PZ's own GL texture instead of creating a second one via glGenTextures
+- **Multi-framebuffer** — ConcurrentHashMap tracks per-texture state, not static globals
+- **Thread-safe** — fresh ByteBuffer per update prevents race between MainThread writes and RenderThread reads
+- **NEAREST by default** — flags=3 on Texture constructor for pixel-perfect rendering
 
 ### Why This Works
 
@@ -57,27 +62,31 @@ Anonymous inner classes (the Runnables) compile to `Color$1.class`, `Color$2.cla
 
 ## API Reference
 
-### From Lua:
+### Low-level Java API (Color.fb* methods):
 
 ```lua
--- Create a framebuffer texture (GL init is async — queued to render thread)
-local tex = Color.fbCreate(width, height)
+Color.fbPing()                              -- Returns "PZFB 1.0.0"
+Color.fbVersion()                           -- Returns "1.0.0"
+Color.fbCreate(width, height)               -- Returns Texture (NEAREST filtering)
+Color.fbCreateLinear(width, height)         -- Returns Texture (LINEAR filtering)
+Color.fbIsReady(tex)                        -- Returns boolean (per-texture)
+Color.fbFill(tex, r, g, b, a)              -- Fills solid color (0-255 each)
+Color.fbLoadRaw(tex, path)                  -- Loads raw RGBA file, returns boolean
+Color.fbDestroy(tex)                        -- Frees GL resources
+```
 
--- Check if GL initialization is complete (call before fbFill/fbLoadRaw)
-local ready = Color.fbIsReady()  -- returns boolean
+### High-level Lua API (recommended — see docs/API_REFERENCE.md):
 
--- Fill entire texture with solid RGBA color (values 0-255)
-Color.fbFill(tex, r, g, b, a)
-
--- Load raw RGBA pixel data from a file
--- File must be exactly width * height * 4 bytes, raw RGBA, no header
-Color.fbLoadRaw(tex, "/full/path/to/file.raw")
-
--- Verify our patched code is loaded
-local msg = Color.fbPing()  -- returns "RT-Zomboid FrameBuffer active!"
-
--- Draw in a UI panel's render() method:
-self:drawTextureScaled(tex, x, y, w, h, 1, 1, 1, 1)
+```lua
+require "PZFB/PZFBApi"
+PZFB.isAvailable()                          -- Check if class files deployed
+PZFB.create(width, height)                  -- Returns fb handle table
+PZFB.createLinear(width, height)            -- Returns fb handle (LINEAR)
+PZFB.isReady(fb)                            -- Check GL readiness
+PZFB.fill(fb, r, g, b, a)                  -- Fill solid color
+PZFB.loadRaw(fb, path)                      -- Load raw RGBA file
+PZFB.getTexture(fb)                         -- Get Texture for drawing
+PZFB.destroy(fb)                            -- Clean up
 ```
 
 ### Timing:
@@ -96,8 +105,9 @@ self:drawTextureScaled(tex, x, y, w, h, 1, 1, 1, 1)
 - Example: 160x144 (Gameboy) = 92,160 bytes
 - Example: 256x240 (NES) = 245,760 bytes
 
-## Verified Working (Tested 2026-04-03)
+## Verified Working
 
+### PoC (2026-04-03, single-buffer version)
 - [x] `Color.fbPing()` — custom Java code executes from Lua
 - [x] `Color.fbCreate(64, 64)` — creates texture, returns to Lua, no crash
 - [x] `Color.fbIsReady()` — returns true after GL init completes
@@ -106,6 +116,18 @@ self:drawTextureScaled(tex, x, y, w, h, 1, 1, 1, 1)
 - [x] `drawTextureScaled()` — renders at any size in UI panel
 - [x] Multiple updates (fill red, then load gradient, then fill red again)
 - [x] No crashes across all tests
+- [x] Game functions normally with patched Color class
+
+### v1.0.0 (2026-04-03, multi-buffer refactor)
+- [x] Compiles clean with Java 25, no warnings
+- [x] No reflection used — TextureID.getID() is public
+- [x] No manual glGenTextures — PZ's own Texture constructor handles GL allocation
+- [x] ConcurrentHashMap for multi-framebuffer state
+- [x] Fresh ByteBuffer per update (copy-on-queue thread safety)
+- [x] Two independent framebuffers created and displayed simultaneously
+- [x] fbFill: independent colors (red + blue) on separate framebuffers
+- [x] fbLoadRaw: gradient loaded into one FB without affecting the other
+- [x] fbDestroy: both framebuffers destroyed cleanly, no crash
 - [x] Game functions normally with patched Color class
 
 ## What Does NOT Work
@@ -237,7 +259,7 @@ This means the current install is two steps:
 2. Enable the Lua mod from Workshop
 
 ### Goal: One-Click Workshop Install
-For a proper Steam Workshop release, the mod needs to work without manual file copying. The TrueVideo mod author (Workshop ID 3665970132) claimed his "real version" would be a simple Workshop download, implying he solved this distribution problem. Since his framebuffer technique appears to be the same as ours (he got it working with no slowdowns), he likely also solved the deployment problem.
+For a proper Steam Workshop release, the mod needs to work without manual file copying.
 
 ### Possible Solutions to Investigate
 1. **Lua-side auto-deploy:** On game start, a Lua script copies the .class files from the mod's media directory to the PZ install directory. Would require a game restart to take effect (classes loaded at JVM startup). Could detect if deployment is needed and prompt the user.
