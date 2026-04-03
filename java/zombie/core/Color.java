@@ -862,34 +862,93 @@ implements Serializable {
     }
 
     // Create a ProcessBuilder that works inside pressure-vessel containers.
-    // Uses host dynamic linker + host library paths, clears JVM's LD_PRELOAD.
+    // Uses host dynamic linker + LD_LIBRARY_PATH for host lib directories.
     private static ProcessBuilder buildHostProcess(String... args) {
         ProcessBuilder pb;
         if (useHostSpawn()) {
-            // Run via host's dynamic linker with host library paths
-            String[] cmd = new String[args.length + 3];
-            cmd[0] = "/run/host/lib64/ld-linux-x86-64.so.2";
-            cmd[1] = "--library-path";
-            cmd[2] = "/run/host/usr/lib64:/run/host/lib64:/run/host/usr/lib";
-            for (int i = 0; i < args.length; i++) {
-                cmd[i + 3] = "/run/host/usr/bin/" + args[i];
-                // Only prefix the first arg (the executable) with /run/host/usr/bin/
-                if (i == 0) continue;
-                cmd[i + 3] = args[i];
-            }
-            // Fix: only the executable gets the /run/host prefix
-            cmd[3] = "/run/host/usr/bin/" + args[0];
+            // Build command: host ld-linux + host binary + original args
+            String hostLinker = "/run/host/lib64/ld-linux-x86-64.so.2";
+            String hostBin = "/run/host/usr/bin/" + args[0];
+            String[] cmd = new String[args.length + 1];
+            cmd[0] = hostLinker;
+            cmd[1] = hostBin;
             for (int i = 1; i < args.length; i++) {
-                cmd[i + 3] = args[i];
+                cmd[i + 1] = args[i];
             }
             pb = new ProcessBuilder(cmd);
+            // LD_LIBRARY_PATH adds to search (unlike --library-path which replaces).
+            // Read /run/host/etc/ld.so.conf paths + common private lib dirs.
+            pb.environment().put("LD_LIBRARY_PATH", buildHostLibPath());
         } else {
             pb = new ProcessBuilder(args);
         }
-        // Clear JVM environment vars that break child processes
         pb.environment().remove("LD_PRELOAD");
         pb.redirectErrorStream(true);
         return pb;
+    }
+
+    // Build comprehensive LD_LIBRARY_PATH from host's /etc/ld.so.conf + common dirs
+    private static String _cachedHostLibPath = null;
+    private static String buildHostLibPath() {
+        if (_cachedHostLibPath != null) return _cachedHostLibPath;
+        java.util.LinkedHashSet<String> paths = new java.util.LinkedHashSet<>();
+        // Read host's ld.so.conf
+        try {
+            readLdConf("/run/host/etc/ld.so.conf", paths);
+        } catch (Exception ignore) {}
+        // Always include standard paths
+        String[] standard = {"/lib64", "/usr/lib64", "/usr/lib", "/lib",
+            "/usr/local/lib64", "/usr/local/lib"};
+        for (String s : standard) paths.add("/run/host" + s);
+        // Common private library subdirectories
+        String[] privDirs = {"pulseaudio", "pipewire-0.3", "alsa-lib"};
+        for (String d : privDirs) {
+            String p = "/run/host/usr/lib64/" + d;
+            if (new java.io.File(p).isDirectory()) paths.add(p);
+        }
+        StringBuilder sb = new StringBuilder();
+        for (String p : paths) {
+            if (sb.length() > 0) sb.append(":");
+            sb.append(p);
+        }
+        _cachedHostLibPath = sb.toString();
+        return _cachedHostLibPath;
+    }
+
+    // Parse ld.so.conf, following includes
+    private static void readLdConf(String path, java.util.LinkedHashSet<String> paths) {
+        try {
+            java.io.File f = new java.io.File(path);
+            if (!f.exists()) return;
+            java.io.BufferedReader br = new java.io.BufferedReader(new java.io.FileReader(f));
+            String line;
+            while ((line = br.readLine()) != null) {
+                line = line.trim();
+                if (line.isEmpty() || line.startsWith("#")) continue;
+                if (line.startsWith("include ")) {
+                    String pattern = line.substring(8).trim();
+                    // Resolve relative to the conf file's directory
+                    String dir = f.getParent();
+                    if (!pattern.startsWith("/")) pattern = dir + "/" + pattern;
+                    // Simple glob: only handle *.conf in a directory
+                    java.io.File globDir = new java.io.File(pattern).getParentFile();
+                    if (globDir != null && globDir.isDirectory()) {
+                        java.io.File[] files = globDir.listFiles();
+                        if (files != null) {
+                            for (java.io.File cf : files) {
+                                if (cf.getName().endsWith(".conf")) {
+                                    readLdConf(cf.getAbsolutePath(), paths);
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // It's a library path — prefix with /run/host
+                    paths.add("/run/host" + line);
+                }
+            }
+            br.close();
+        } catch (Exception ignore) {}
     }
 
     private static volatile int _fbConvertStatus = 0; // 0=idle 1=running 2=done 3=error
