@@ -853,10 +853,14 @@ implements Serializable {
 
     private static String findExecutable(String name) {
         // Try common absolute paths first (Steam/PZ may have a stripped PATH)
+        // Include /run/host/ prefixed paths for Steam pressure-vessel containers
         String[] searchPaths = {
             "/usr/bin/" + name,
+            "/run/host/usr/bin/" + name,
             "/usr/local/bin/" + name,
+            "/run/host/usr/local/bin/" + name,
             "/bin/" + name,
+            "/run/host/bin/" + name,
             "/opt/homebrew/bin/" + name,
             "/snap/bin/" + name,
             System.getProperty("user.home") + "/bin/" + name,
@@ -1034,6 +1038,36 @@ implements Serializable {
         } catch (Exception e) {
             return false;
         }
+    }
+
+    public static String fbFFmpegDiag() {
+        StringBuilder sb = new StringBuilder();
+        // Check if inside pressure-vessel container
+        String pvRuntime = System.getenv("PRESSURE_VESSEL_RUNTIME");
+        sb.append("pressure_vessel=").append(pvRuntime != null ? pvRuntime : "no").append("; ");
+        boolean hasRunHost = new java.io.File("/run/host/usr/bin").exists();
+        sb.append("run_host=").append(hasRunHost).append("; ");
+        // Test paths including /run/host (pressure-vessel host mount)
+        String[] testPaths = {
+            "/usr/bin/ffmpeg", "/run/host/usr/bin/ffmpeg",
+            "/usr/local/bin/ffmpeg", "/run/host/usr/local/bin/ffmpeg"
+        };
+        for (String p : testPaths) {
+            java.io.File f = new java.io.File(p);
+            if (f.exists()) sb.append(p).append(" FOUND; ");
+        }
+        sb.append("cached=").append(_fbFFmpegPath).append("; ");
+        _fbFFmpegPath = null;
+        sb.append("resolved=").append(getFFmpegPath()).append("; ");
+        // List what IS in /usr/bin (first 10)
+        java.io.File usrBin = new java.io.File("/usr/bin");
+        if (usrBin.exists()) {
+            String[] files = usrBin.list();
+            sb.append("usr_bin_count=").append(files != null ? files.length : 0).append("; ");
+        } else {
+            sb.append("usr_bin_missing; ");
+        }
+        return sb.toString();
     }
 
     // === PZFB Utilities ===

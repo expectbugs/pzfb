@@ -235,6 +235,13 @@ function PZFB.ffmpegAvailable()
     return Color.fbFFmpegAvailable()
 end
 
+--- Get ffmpeg diagnostic info (for troubleshooting).
+--- @return string diagnostic details
+function PZFB.ffmpegDiag()
+    if not PZFB.AVAILABLE then return "PZFB not available" end
+    return Color.fbFFmpegDiag()
+end
+
 -- === Utilities ===
 
 --- List files in a directory.
