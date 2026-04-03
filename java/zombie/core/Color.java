@@ -848,6 +848,48 @@ implements Serializable {
 
     // === PZFB Convert — FFmpeg video conversion via ProcessBuilder ===
 
+    private static String _fbFFmpegPath = null;
+    private static String _fbFFprobePath = null;
+
+    private static String findExecutable(String name) {
+        // Try common absolute paths first (Steam/PZ may have a stripped PATH)
+        String[] searchPaths = {
+            "/usr/bin/" + name,
+            "/usr/local/bin/" + name,
+            "/bin/" + name,
+            "/opt/homebrew/bin/" + name,
+            "/snap/bin/" + name,
+            System.getProperty("user.home") + "/bin/" + name,
+        };
+        for (String path : searchPaths) {
+            java.io.File f = new java.io.File(path);
+            if (f.exists() && f.canExecute()) return path;
+        }
+        // Windows common paths
+        String[] winPaths = {
+            "C:\\ffmpeg\\bin\\" + name + ".exe",
+            System.getenv("LOCALAPPDATA") != null ? System.getenv("LOCALAPPDATA") + "\\ffmpeg\\bin\\" + name + ".exe" : null,
+            System.getenv("ProgramFiles") != null ? System.getenv("ProgramFiles") + "\\ffmpeg\\bin\\" + name + ".exe" : null,
+        };
+        for (String path : winPaths) {
+            if (path == null) continue;
+            java.io.File f = new java.io.File(path);
+            if (f.exists() && f.canExecute()) return path;
+        }
+        // Fallback: try bare name (relies on PATH)
+        return name;
+    }
+
+    private static String getFFmpegPath() {
+        if (_fbFFmpegPath == null) _fbFFmpegPath = findExecutable("ffmpeg");
+        return _fbFFmpegPath;
+    }
+
+    private static String getFFprobePath() {
+        if (_fbFFprobePath == null) _fbFFprobePath = findExecutable("ffprobe");
+        return _fbFFprobePath;
+    }
+
     private static volatile int _fbConvertStatus = 0; // 0=idle 1=running 2=done 3=error
     private static volatile String _fbConvertError = "";
 
@@ -874,8 +916,10 @@ implements Serializable {
                     String audioPath = outDir + java.io.File.separator + "audio.ogg";
 
                     // Convert video to raw RGBA
+                    String ffmpegCmd = getFFmpegPath();
+                    String ffprobeCmd = getFFprobePath();
                     ProcessBuilder pb1 = new ProcessBuilder(
-                        "ffmpeg", "-y", "-i", inPath,
+                        ffmpegCmd, "-y", "-i", inPath,
                         "-vf", "scale=" + w + ":" + h,
                         "-pix_fmt", "rgba", "-f", "rawvideo", rawPath
                     );
@@ -896,7 +940,7 @@ implements Serializable {
                     boolean hasAudio = false;
                     try {
                         ProcessBuilder pb2 = new ProcessBuilder(
-                            "ffmpeg", "-y", "-i", inPath,
+                            ffmpegCmd, "-y", "-i", inPath,
                             "-vn", "-acodec", "libvorbis", "-q:a", "5", audioPath
                         );
                         pb2.redirectErrorStream(true);
@@ -911,7 +955,7 @@ implements Serializable {
                     String fpsStr = "24";
                     try {
                         ProcessBuilder pb3 = new ProcessBuilder(
-                            "ffprobe", "-v", "0", "-select_streams", "v",
+                            ffprobeCmd, "-v", "0", "-select_streams", "v",
                             "-of", "csv=p=0", "-show_entries", "stream=r_frame_rate", inPath
                         );
                         pb3.redirectErrorStream(true);
@@ -978,7 +1022,8 @@ implements Serializable {
 
     public static boolean fbFFmpegAvailable() {
         try {
-            ProcessBuilder pb = new ProcessBuilder("ffmpeg", "-version");
+            String ffmpeg = getFFmpegPath();
+            ProcessBuilder pb = new ProcessBuilder(ffmpeg, "-version");
             pb.redirectErrorStream(true);
             Process p = pb.start();
             java.io.InputStream is = p.getInputStream();
