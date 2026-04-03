@@ -861,16 +861,35 @@ implements Serializable {
         return _fbUseHostSpawn;
     }
 
-    // Build a command array: if inside pressure-vessel, prefix with flatpak-spawn --host
-    private static String[] buildCommand(String... args) {
+    // Create a ProcessBuilder that works inside pressure-vessel containers.
+    // Uses host dynamic linker + host library paths, clears JVM's LD_PRELOAD.
+    private static ProcessBuilder buildHostProcess(String... args) {
+        ProcessBuilder pb;
         if (useHostSpawn()) {
-            String[] result = new String[args.length + 2];
-            result[0] = "/usr/bin/flatpak-spawn";
-            result[1] = "--host";
-            System.arraycopy(args, 0, result, 2, args.length);
-            return result;
+            // Run via host's dynamic linker with host library paths
+            String[] cmd = new String[args.length + 3];
+            cmd[0] = "/run/host/lib64/ld-linux-x86-64.so.2";
+            cmd[1] = "--library-path";
+            cmd[2] = "/run/host/usr/lib64:/run/host/lib64:/run/host/usr/lib";
+            for (int i = 0; i < args.length; i++) {
+                cmd[i + 3] = "/run/host/usr/bin/" + args[i];
+                // Only prefix the first arg (the executable) with /run/host/usr/bin/
+                if (i == 0) continue;
+                cmd[i + 3] = args[i];
+            }
+            // Fix: only the executable gets the /run/host prefix
+            cmd[3] = "/run/host/usr/bin/" + args[0];
+            for (int i = 1; i < args.length; i++) {
+                cmd[i + 3] = args[i];
+            }
+            pb = new ProcessBuilder(cmd);
+        } else {
+            pb = new ProcessBuilder(args);
         }
-        return args;
+        // Clear JVM environment vars that break child processes
+        pb.environment().remove("LD_PRELOAD");
+        pb.redirectErrorStream(true);
+        return pb;
     }
 
     private static volatile int _fbConvertStatus = 0; // 0=idle 1=running 2=done 3=error
@@ -899,12 +918,11 @@ implements Serializable {
                     String audioPath = outDir + java.io.File.separator + "audio.ogg";
 
                     // Convert video to raw RGBA
-                    ProcessBuilder pb1 = new ProcessBuilder(buildCommand(
+                    ProcessBuilder pb1 = buildHostProcess(
                         "ffmpeg", "-y", "-i", inPath,
                         "-vf", "scale=" + w + ":" + h,
                         "-pix_fmt", "rgba", "-f", "rawvideo", rawPath
-                    ));
-                    pb1.redirectErrorStream(true);
+                    );
                     Process p1 = pb1.start();
                     // Drain output to prevent blocking
                     java.io.InputStream is1 = p1.getInputStream();
@@ -920,11 +938,10 @@ implements Serializable {
                     // Extract audio (non-fatal if fails — video may have no audio)
                     boolean hasAudio = false;
                     try {
-                        ProcessBuilder pb2 = new ProcessBuilder(buildCommand(
+                        ProcessBuilder pb2 = buildHostProcess(
                             "ffmpeg", "-y", "-i", inPath,
                             "-vn", "-acodec", "libvorbis", "-q:a", "5", audioPath
-                        ));
-                        pb2.redirectErrorStream(true);
+                        );
                         Process p2 = pb2.start();
                         java.io.InputStream is2 = p2.getInputStream();
                         while (is2.read(drain) != -1) {}
@@ -935,11 +952,10 @@ implements Serializable {
                     // Get FPS via ffprobe
                     String fpsStr = "24";
                     try {
-                        ProcessBuilder pb3 = new ProcessBuilder(buildCommand(
+                        ProcessBuilder pb3 = buildHostProcess(
                             "ffprobe", "-v", "0", "-select_streams", "v",
                             "-of", "csv=p=0", "-show_entries", "stream=r_frame_rate", inPath
-                        ));
-                        pb3.redirectErrorStream(true);
+                        );
                         Process p3 = pb3.start();
                         java.io.BufferedReader br = new java.io.BufferedReader(
                             new java.io.InputStreamReader(p3.getInputStream())
@@ -1003,8 +1019,7 @@ implements Serializable {
 
     public static boolean fbFFmpegAvailable() {
         try {
-            ProcessBuilder pb = new ProcessBuilder(buildCommand("ffmpeg", "-version"));
-            pb.redirectErrorStream(true);
+            ProcessBuilder pb = buildHostProcess("ffmpeg", "-version");
             Process p = pb.start();
             java.io.InputStream is = p.getInputStream();
             byte[] drain = new byte[4096];
@@ -1018,33 +1033,18 @@ implements Serializable {
 
     public static String fbFFmpegDiag() {
         StringBuilder sb = new StringBuilder();
-        sb.append("pv=").append(System.getenv("PRESSURE_VESSEL_RUNTIME") != null ? "yes" : "no").append("; ");
-        // Check host linker and library paths
-        String[] checkPaths = {
-            "/run/host/lib64/ld-linux-x86-64.so.2",
-            "/run/host/usr/lib64",
-            "/run/host/usr/bin/ffmpeg"
-        };
-        for (String p : checkPaths) {
-            sb.append(p.replace("/run/host/", "H:")).append("=").append(new java.io.File(p).exists()).append("; ");
-        }
-        // Try host linker approach
+        sb.append("pv=").append(useHostSpawn()).append("; ");
         try {
-            ProcessBuilder pb = new ProcessBuilder(
-                "/run/host/lib64/ld-linux-x86-64.so.2",
-                "--library-path", "/run/host/usr/lib64:/run/host/lib64:/run/host/usr/lib",
-                "/run/host/usr/bin/ffmpeg", "-version"
-            );
-            pb.redirectErrorStream(true);
+            ProcessBuilder pb = buildHostProcess("ffmpeg", "-version");
             Process p = pb.start();
             java.io.InputStream is = p.getInputStream();
             byte[] buf = new byte[200];
             int n = is.read(buf);
             int exit = p.waitFor();
             String out = n > 0 ? new String(buf, 0, Math.min(n, 80)).split("\n")[0] : "";
-            sb.append("linker_exit=").append(exit).append("; out=").append(out);
+            sb.append("exit=").append(exit).append("; out=").append(out);
         } catch (Exception e) {
-            sb.append("linker_err=").append(e.getMessage());
+            sb.append("err=").append(e.getClass().getSimpleName()).append(": ").append(e.getMessage());
         }
         return sb.toString();
     }
