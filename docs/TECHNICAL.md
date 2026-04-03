@@ -252,6 +252,28 @@ For a proper Steam Workshop release, the mod needs to work without manual file c
 
 The fresh instance should investigate these approaches. The TrueVideo author's approach is the strongest lead — if he claimed Workshop-only distribution, one of these methods works.
 
+## Input Capture Problem
+
+### The Problem
+The framebuffer solves OUTPUT (pixels on screen). INPUT (keystrokes to an emulator) is a separate challenge. `Events.OnKeyPressed` gives raw key codes, but:
+
+1. **Key conflict:** When the player presses arrow keys for an emulator, PZ also moves their character. Keypresses go to BOTH the game and our code. We need to "eat" the keystroke so PZ doesn't see it.
+2. **Key-down/key-up timing:** Emulators expect press/release events. `OnKeyPressed` may only fire on press. Need to investigate `OnKeyStartPressed` vs `OnKeyPressed` and whether there's an `OnKeyReleased`.
+3. **Modifier keys:** Shift, Ctrl, Alt combinations for emulator hotkeys (save state, speed up, etc.)
+
+### Approaches to Investigate
+
+1. **ISTextEntryBox focus model:** PZ's own text entry boxes capture keyboard focus and prevent game input while typing. Study how this works — it's the proven pattern for stealing keyboard from the game. The relevant code is in `ISTextEntryBox` and the Java `UIElement` focus system.
+
+2. **Timed action / seated state:** When a character is "using" the terminal furniture, lock them in place like sitting in a vehicle. WASD does nothing in-game, freeing those keys for the emulator. PZ already has this concept for vehicle seats and timed actions.
+
+3. **Fallback: movement lock + WASD:** At worst, freeze the character in place when the emulator tab is open (simulate sitting at the computer desk like sitting in a dead vehicle) and remap WASD as directional input for the emulator. This works even if we can't fully steal keyboard focus.
+
+4. **ISPanel:setKeyboardFocus()** or similar — check if UI panels have a method to claim keyboard focus. If so, the emulator tab could grab focus when active and release it when closed.
+
+### What the Fresh Instance Should Do
+Look at how `ISTextEntryBox` steals keyboard focus from the game (verified to work — typing in chat doesn't move the character). Replicate that pattern for the emulator panel. Also check timed actions and vehicle seat states for movement locking.
+
 ## Potential Future Enhancements
 
 - **fbSetPixelData(Texture, byte[])** — accept pixel data directly from Java without file I/O
