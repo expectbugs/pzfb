@@ -268,7 +268,7 @@ end
 --- @param bufferFrames number frames in ring buffer (default 60)
 function PZFB.streamStart(inputPath, qualityScale, bufferFrames)
     if not PZFB.AVAILABLE then return end
-    Color.fbStreamStart(inputPath, qualityScale or 1.0, bufferFrames or 60)
+    Color.fbStreamStart(inputPath, qualityScale or 1.0, bufferFrames or 120)
 end
 
 function PZFB.streamFrame(fb, frameIndex)
