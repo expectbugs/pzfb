@@ -174,6 +174,23 @@ function PZFB.audioSeek(positionMs)
     Color.fbAudioSeek(positionMs)
 end
 
+--- Stop current audio, start fresh from a position in milliseconds.
+--- More reliable than audioSeek for large jumps.
+--- @param positionMs number position in milliseconds
+--- @return boolean
+function PZFB.audioPlayFrom(positionMs)
+    if not PZFB.AVAILABLE then return false end
+    return Color.fbAudioPlayFrom(positionMs)
+end
+
+--- Diagnostic: test audio seek behavior.
+--- @param positionMs number position to seek to
+--- @return string diagnostic info
+function PZFB.audioSeekDiag(positionMs)
+    if not PZFB.AVAILABLE then return "unavailable" end
+    return Color.fbAudioSeekDiag(positionMs)
+end
+
 --- Get current audio playback position in milliseconds.
 --- @return number position in milliseconds
 function PZFB.audioGetPosition()

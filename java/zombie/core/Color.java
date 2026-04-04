@@ -819,6 +819,45 @@ implements Serializable {
         }
     }
 
+    // Reliable seek: stop current channel, play fresh from position (paused), then unpause.
+    // Avoids issues with SetPosition on active channels.
+    public static boolean fbAudioPlayFrom(long positionMs) {
+        if (_fbAudioSound == 0) return false;
+        try {
+            // Stop current channel
+            if (_fbAudioChannel != 0) {
+                try { fmod.javafmod.FMOD_Channel_Stop(_fbAudioChannel); } catch (Exception ignore) {}
+                _fbAudioChannel = 0;
+            }
+            // Create new channel, start paused
+            long channel = fmod.javafmod.FMOD_System_PlaySound(_fbAudioSound, true);
+            if (channel == 0) return false;
+            _fbAudioChannel = channel;
+            // Seek while paused
+            if (positionMs > 0) {
+                fmod.javafmod.FMOD_Channel_SetPosition(channel, positionMs);
+            }
+            // Unpause
+            fmod.javafmod.FMOD_Channel_SetPaused(channel, false);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    // Diagnostic: test what SetPosition actually does
+    public static String fbAudioSeekDiag(long positionMs) {
+        if (_fbAudioChannel == 0) return "no_channel";
+        try {
+            long beforeMs = fmod.javafmod.FMOD_Channel_GetPosition(_fbAudioChannel, 1);
+            int result = fmod.javafmod.FMOD_Channel_SetPosition(_fbAudioChannel, positionMs);
+            long afterMs = fmod.javafmod.FMOD_Channel_GetPosition(_fbAudioChannel, 1);
+            return "before=" + beforeMs + " target=" + positionMs + " result=" + result + " after=" + afterMs;
+        } catch (Exception e) {
+            return "error=" + e.getMessage();
+        }
+    }
+
     public static long fbAudioGetPosition() {
         if (_fbAudioChannel == 0) return 0;
         try {
