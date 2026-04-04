@@ -1450,16 +1450,32 @@ implements Serializable {
         // GL upload outside lock — identical pattern to fbLoadRawFrame (which works)
         final int w = tex.getWidth();
         final int h = tex.getHeight();
+        final int expectedSize = w * h * 4;
+
+        // Diagnostic: verify data size matches texture
+        if (data.length != expectedSize) {
+            System.out.println("[PZFB STREAM] SIZE MISMATCH: data=" + data.length + " expected=" + expectedSize + " w=" + w + " h=" + h);
+            return false;
+        }
+
+        // Diagnostic: log first few bytes + hash to verify data changes between frames
+        final int hash = java.util.Arrays.hashCode(data);
+
         final java.nio.ByteBuffer buf = java.nio.ByteBuffer.allocateDirect(data.length);
         buf.put(data);
         buf.flip();
         final int glId = tex.getTextureId().getID();
+        final int fIdx = frameIndex;
         zombie.core.opengl.RenderThread.queueInvokeOnRenderContext(new Runnable() {
             public void run() {
                 org.lwjgl.opengl.GL11.glBindTexture(0x0DE1, glId);
                 org.lwjgl.opengl.GL11.glTexSubImage2D(
                     0x0DE1, 0, 0, 0, w, h, 0x1908, 0x1401, buf
                 );
+                // Log every 60th frame from render thread to verify execution
+                if (fIdx % 60 == 0) {
+                    System.out.println("[PZFB STREAM RT] frame=" + fIdx + " glId=" + glId + " hash=" + hash + " w=" + w + " h=" + h);
+                }
             }
         });
         return true;
