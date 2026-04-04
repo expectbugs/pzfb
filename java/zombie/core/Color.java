@@ -1360,6 +1360,12 @@ implements Serializable {
                         int frameIndex = seekFrame;
 
                         while (proc.isAlive() || videoIn.available() > 0) {
+                            // Wait if buffer is full — throttles ffmpeg to playback speed
+                            while (_fbStreamBufCount >= _fbStreamBufCapacity) {
+                                if (_fbStreamStatus == 0) return; // stopped
+                                try { Thread.sleep(5); } catch (Exception ignore) {}
+                            }
+
                             byte[] frame = new byte[frameSize];
                             int read = 0;
                             while (read < frameSize) {
@@ -1370,17 +1376,9 @@ implements Serializable {
                             if (read != frameSize) break; // EOF or incomplete
 
                             synchronized (_fbStreamLock) {
-                                int slot;
-                                if (_fbStreamBufCount < _fbStreamBufCapacity) {
-                                    slot = (_fbStreamBufStart + _fbStreamBufCount) % _fbStreamBufCapacity;
-                                    _fbStreamBuffer[slot] = frame;
-                                    _fbStreamBufCount++;
-                                } else {
-                                    // Buffer full — overwrite oldest
-                                    slot = _fbStreamBufStart % _fbStreamBufCapacity;
-                                    _fbStreamBuffer[slot] = frame;
-                                    _fbStreamBufStart++;
-                                }
+                                int slot = (_fbStreamBufStart + _fbStreamBufCount) % _fbStreamBufCapacity;
+                                _fbStreamBuffer[slot] = frame;
+                                _fbStreamBufCount++;
                             }
 
                             frameIndex++;
@@ -1424,6 +1422,14 @@ implements Serializable {
             if (slot < 0) slot += _fbStreamBufCapacity;
             byte[] data = _fbStreamBuffer[slot];
             if (data == null) return false;
+
+            // Advance buffer start — discard frames we've passed (keep 10 behind for safety)
+            int behind = frameIndex - _fbStreamBufStart;
+            if (behind > 10) {
+                int discard = behind - 10;
+                _fbStreamBufStart += discard;
+                _fbStreamBufCount -= discard;
+            }
 
             final int w = tex.getWidth();
             final int h = tex.getHeight();
