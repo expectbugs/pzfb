@@ -1447,14 +1447,36 @@ implements Serializable {
                 _fbStreamBufCount -= discard;
             }
         }
-        // Write frame to temp file and use fbLoadRawFrame (which is proven to work)
+        // Diagnostic: check everything
+        int texW = tex.getWidth();
+        int texH = tex.getHeight();
+        int expectedSize = texW * texH * 4;
+        int glId = tex.getTextureId().getID();
+        int hwW = tex.getWidthHW();
+        int hwH = tex.getHeightHW();
+
+        if (frameIndex % 60 == 0) {
+            System.out.println("[PZFB STREAM] frame=" + frameIndex
+                + " texW=" + texW + " texH=" + texH
+                + " hwW=" + hwW + " hwH=" + hwH
+                + " dataLen=" + data.length + " expected=" + expectedSize
+                + " glId=" + glId
+                + " hash=" + java.util.Arrays.hashCode(data));
+        }
+
+        // Write frame to temp file and use fbLoadRaw (which is proven to work)
         try {
             String tmpPath = System.getProperty("java.io.tmpdir") + java.io.File.separator + "pzvp_frame.raw";
             java.io.FileOutputStream fos = new java.io.FileOutputStream(tmpPath);
             fos.write(data);
             fos.close();
-            return fbLoadRaw(tex, tmpPath);
+            boolean ok = fbLoadRaw(tex, tmpPath);
+            if (frameIndex % 60 == 0) {
+                System.out.println("[PZFB STREAM] fbLoadRaw returned " + ok);
+            }
+            return ok;
         } catch (Exception e) {
+            System.out.println("[PZFB STREAM] exception: " + e.getMessage());
             return false;
         }
     }
