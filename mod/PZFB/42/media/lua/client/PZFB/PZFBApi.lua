@@ -262,9 +262,13 @@ end
 
 -- === Streaming Video/Audio Playback ===
 
-function PZFB.streamStart(inputPath, targetWidth, bufferFrames)
+--- Start streaming video.
+--- @param inputPath string absolute path to video file
+--- @param qualityScale number 0.0-1.0 fraction of source resolution (1.0 = full)
+--- @param bufferFrames number frames in ring buffer (default 60)
+function PZFB.streamStart(inputPath, qualityScale, bufferFrames)
     if not PZFB.AVAILABLE then return end
-    Color.fbStreamStart(inputPath, targetWidth, bufferFrames or 120)
+    Color.fbStreamStart(inputPath, qualityScale or 1.0, bufferFrames or 60)
 end
 
 function PZFB.streamFrame(fb, frameIndex)

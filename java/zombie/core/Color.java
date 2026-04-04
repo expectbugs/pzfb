@@ -1148,7 +1148,7 @@ implements Serializable {
     private static volatile boolean _fbStreamAudioReady = false;
     private static volatile boolean _fbStreamAudioDone = false;
 
-    public static void fbStreamStart(String inputPath, int targetWidth, int bufferFrames) {
+    public static void fbStreamStart(String inputPath, double qualityScale, int bufferFrames) {
         fbStreamStop();
         _fbStreamInputPath = inputPath;
         _fbStreamBufCapacity = (bufferFrames > 10) ? bufferFrames : 60;
@@ -1216,11 +1216,13 @@ implements Serializable {
                         try { duration = Double.parseDouble(durLine.trim()); } catch (Exception ignore) {}
                     }
 
-                    // 3. Compute scaled dimensions (preserve aspect ratio, round to even)
-                    int scaledW = targetWidth;
-                    int scaledH = (int) Math.round((double) targetWidth * srcH / srcW);
-                    scaledW = scaledW + (scaledW % 2); // ensure even
-                    scaledH = scaledH + (scaledH % 2); // ensure even
+                    // 3. Compute scaled dimensions from source * quality scale
+                    double scale = Math.max(0.1, Math.min(1.0, qualityScale));
+                    int scaledW = (int) Math.round(srcW * scale);
+                    int scaledH = (int) Math.round(srcH * scale);
+                    // Ensure even (ffmpeg requires even dimensions)
+                    scaledW = scaledW + (scaledW % 2);
+                    scaledH = scaledH + (scaledH % 2);
 
                     _fbStreamWidth = scaledW;
                     _fbStreamHeight = scaledH;
