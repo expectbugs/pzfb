@@ -1434,8 +1434,7 @@ implements Serializable {
             if (frameIndex < _fbStreamBufStart || frameIndex >= _fbStreamBufStart + _fbStreamBufCount) {
                 return false;
             }
-            int slot = (frameIndex - _fbStreamBufStart) % _fbStreamBufCapacity;
-            if (slot < 0) slot += _fbStreamBufCapacity;
+            int slot = frameIndex % _fbStreamBufCapacity;
             data = _fbStreamBuffer[slot];
             if (data == null) return false;
 
@@ -1447,38 +1446,22 @@ implements Serializable {
                 _fbStreamBufCount -= discard;
             }
         }
-        // Diagnostic: check everything
-        int texW = tex.getWidth();
-        int texH = tex.getHeight();
-        int expectedSize = texW * texH * 4;
-        int glId = tex.getTextureId().getID();
-        int hwW = tex.getWidthHW();
-        int hwH = tex.getHeightHW();
-
-        if (frameIndex % 60 == 0) {
-            System.out.println("[PZFB STREAM] frame=" + frameIndex
-                + " texW=" + texW + " texH=" + texH
-                + " hwW=" + hwW + " hwH=" + hwH
-                + " dataLen=" + data.length + " expected=" + expectedSize
-                + " glId=" + glId
-                + " hash=" + java.util.Arrays.hashCode(data));
-        }
-
-        // Write frame to temp file and use fbLoadRaw (which is proven to work)
-        try {
-            String tmpPath = System.getProperty("java.io.tmpdir") + java.io.File.separator + "pzvp_frame.raw";
-            java.io.FileOutputStream fos = new java.io.FileOutputStream(tmpPath);
-            fos.write(data);
-            fos.close();
-            boolean ok = fbLoadRaw(tex, tmpPath);
-            if (frameIndex % 60 == 0) {
-                System.out.println("[PZFB STREAM] fbLoadRaw returned " + ok);
+        // GL upload — same pattern as fbLoadRawFrame (proven to work)
+        final int w = tex.getWidth();
+        final int h = tex.getHeight();
+        final java.nio.ByteBuffer buf = java.nio.ByteBuffer.allocateDirect(data.length);
+        buf.put(data);
+        buf.flip();
+        final int glId = tex.getTextureId().getID();
+        zombie.core.opengl.RenderThread.queueInvokeOnRenderContext(new Runnable() {
+            public void run() {
+                org.lwjgl.opengl.GL11.glBindTexture(0x0DE1, glId);
+                org.lwjgl.opengl.GL11.glTexSubImage2D(
+                    0x0DE1, 0, 0, 0, w, h, 0x1908, 0x1401, buf
+                );
             }
-            return ok;
-        } catch (Exception e) {
-            System.out.println("[PZFB STREAM] exception: " + e.getMessage());
-            return false;
-        }
+        });
+        return true;
     }
 
     public static void fbStreamSeek(double timeSec) {
