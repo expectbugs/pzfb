@@ -1427,6 +1427,8 @@ implements Serializable {
 
     public static boolean fbStreamFrame(zombie.core.textures.Texture tex, int frameIndex) {
         if (!fbIsReady(tex)) return false;
+        // Copy data out of the synchronized block — keep lock time minimal
+        byte[] data;
         synchronized (_fbStreamLock) {
             if (_fbStreamBuffer == null || _fbStreamBufCount == 0) return false;
             if (frameIndex < _fbStreamBufStart || frameIndex >= _fbStreamBufStart + _fbStreamBufCount) {
@@ -1434,7 +1436,7 @@ implements Serializable {
             }
             int slot = (frameIndex - _fbStreamBufStart) % _fbStreamBufCapacity;
             if (slot < 0) slot += _fbStreamBufCapacity;
-            byte[] data = _fbStreamBuffer[slot];
+            data = _fbStreamBuffer[slot];
             if (data == null) return false;
 
             // Advance buffer start — discard frames we've passed (keep 10 behind for safety)
@@ -1444,23 +1446,23 @@ implements Serializable {
                 _fbStreamBufStart += discard;
                 _fbStreamBufCount -= discard;
             }
-
-            final int w = tex.getWidth();
-            final int h = tex.getHeight();
-            final java.nio.ByteBuffer buf = java.nio.ByteBuffer.allocateDirect(data.length);
-            buf.put(data);
-            buf.flip();
-            final int glId = tex.getTextureId().getID();
-            zombie.core.opengl.RenderThread.queueInvokeOnRenderContext(new Runnable() {
-                public void run() {
-                    org.lwjgl.opengl.GL11.glBindTexture(0x0DE1, glId);
-                    org.lwjgl.opengl.GL11.glTexSubImage2D(
-                        0x0DE1, 0, 0, 0, w, h, 0x1908, 0x1401, buf
-                    );
-                }
-            });
-            return true;
         }
+        // GL upload outside lock — identical pattern to fbLoadRawFrame (which works)
+        final int w = tex.getWidth();
+        final int h = tex.getHeight();
+        final java.nio.ByteBuffer buf = java.nio.ByteBuffer.allocateDirect(data.length);
+        buf.put(data);
+        buf.flip();
+        final int glId = tex.getTextureId().getID();
+        zombie.core.opengl.RenderThread.queueInvokeOnRenderContext(new Runnable() {
+            public void run() {
+                org.lwjgl.opengl.GL11.glBindTexture(0x0DE1, glId);
+                org.lwjgl.opengl.GL11.glTexSubImage2D(
+                    0x0DE1, 0, 0, 0, w, h, 0x1908, 0x1401, buf
+                );
+            }
+        });
+        return true;
     }
 
     public static void fbStreamSeek(double timeSec) {
