@@ -124,7 +124,26 @@ panel:releaseInput()
 | `PZFB.audioGetLength()` | `number` | Total length in milliseconds |
 | `PZFB.audioIsPlaying()` | `boolean` | Check if audio is playing |
 
-### Video Conversion (ffmpeg)
+### Streaming Video/Audio (ffmpeg)
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `PZFB.streamStart(path, scale, bufFrames)` | — | Start streaming (scale=0.0-1.0 of source) |
+| `PZFB.streamFrame(fb, frameIndex)` | `boolean` | Load frame from ring buffer to texture |
+| `PZFB.streamSeek(timeSec)` | — | Seek video (kills/restarts ffmpeg) |
+| `PZFB.streamStop()` | — | Stop streaming, free resources |
+| `PZFB.streamStatus()` | `number` | 0=idle 1=probing 2=buffering 3=ready 4=done 5=error |
+| `PZFB.streamWidth/Height()` | `number` | Detected scaled dimensions |
+| `PZFB.streamFps()` | `number` | Detected FPS |
+| `PZFB.streamDuration()` | `number` | Total duration in seconds |
+| `PZFB.streamTotalFrames()` | `number` | Estimated total frames |
+| `PZFB.streamAudioPath()` | `string` | Path to temp WAV (empty if not ready) |
+| `PZFB.streamAudioReady()` | `boolean` | Enough audio data for playback |
+| `PZFB.streamAudioDone()` | `boolean` | Audio extraction fully complete |
+| `PZFB.audioPlayFrom(posMs)` | `boolean` | Stop + play from position (reliable seek) |
+| `PZFB.ffmpegAvailable()` | `boolean` | Check if ffmpeg is on PATH |
+
+### Video Conversion (ffmpeg, legacy)
 
 | Function | Returns | Description |
 |----------|---------|-------------|
@@ -132,7 +151,6 @@ panel:releaseInput()
 | `PZFB.convertStatus()` | `number` | 0=idle, 1=running, 2=done, 3=error |
 | `PZFB.convertError()` | `string` | Error message if status==3 |
 | `PZFB.convertReset()` | — | Reset status to idle |
-| `PZFB.ffmpegAvailable()` | `boolean` | Check if ffmpeg is on PATH |
 
 ### Utilities
 
