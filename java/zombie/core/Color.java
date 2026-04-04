@@ -758,8 +758,9 @@ implements Serializable {
         try {
             java.io.File f = new java.io.File(path);
             if (!f.exists()) return false;
-            // flags: FMOD_LOOP_OFF(0x1) | FMOD_2D(0x8) | FMOD_CREATESTREAM(0x80) = 0x89
-            long sound = fmod.javafmod.FMOD_System_CreateSound(path, 0x89);
+            // flags: FMOD_LOOP_OFF(0x1) | FMOD_2D(0x8) — NO CREATESTREAM
+            // Loading full file into memory enables seeking via SetPosition
+            long sound = fmod.javafmod.FMOD_System_CreateSound(path, 0x09);
             if (sound == 0) return false;
             _fbAudioSound = sound;
             return true;
@@ -1559,8 +1560,8 @@ implements Serializable {
     public static int fbStreamHeight() { return _fbStreamHeight; }
     public static double fbStreamFps() { return _fbStreamFps; }
     public static double fbStreamDuration() { return _fbStreamDuration; }
-    public static String fbStreamAudioPath() { return _fbStreamAudioReady ? _fbStreamAudioPath : ""; }
-    public static boolean fbStreamAudioReady() { return _fbStreamAudioReady; }
+    public static String fbStreamAudioPath() { return _fbStreamAudioDone ? _fbStreamAudioPath : ""; }
+    public static boolean fbStreamAudioReady() { return _fbStreamAudioDone; }
     public static int fbStreamTotalFrames() { return (int) Math.floor(_fbStreamDuration * _fbStreamFps); }
     public static int fbStreamBufferStart() {
         synchronized (_fbStreamLock) { return _fbStreamBufStart; }
