@@ -1108,6 +1108,403 @@ implements Serializable {
         return sb.toString();
     }
 
+    // === PZFB Stream — Streaming video/audio playback ===
+
+    // Stream state
+    private static Process _fbStreamVideoProc = null;
+    private static Process _fbStreamAudioProc = null;
+    private static Thread _fbStreamVideoThread = null;
+    private static Thread _fbStreamAudioThread = null;
+    private static volatile int _fbStreamStatus = 0; // 0=idle 1=probing 2=buffering 3=ready 4=done 5=error
+    private static volatile String _fbStreamError = "";
+    private static String _fbStreamInputPath = null;
+
+    // Video info (from ffprobe)
+    private static int _fbStreamWidth = 0;
+    private static int _fbStreamHeight = 0;
+    private static double _fbStreamFps = 24;
+    private static double _fbStreamDuration = 0;
+
+    // Video ring buffer
+    private static final Object _fbStreamLock = new Object();
+    private static byte[][] _fbStreamBuffer = null;
+    private static int _fbStreamBufCapacity = 300;
+    private static int _fbStreamBufStart = 0;
+    private static int _fbStreamBufCount = 0;
+    private static int _fbStreamFrameSize = 0;
+
+    // Audio
+    private static String _fbStreamAudioPath = null;
+    private static volatile boolean _fbStreamAudioReady = false;
+    private static volatile boolean _fbStreamAudioDone = false;
+
+    public static void fbStreamStart(String inputPath, int targetWidth) {
+        fbStreamStop();
+        _fbStreamInputPath = inputPath;
+        _fbStreamStatus = 1; // probing
+        _fbStreamError = "";
+
+        new Thread(new Runnable() {
+            public void run() {
+                try {
+                    // 1. Probe source video with ffprobe
+                    ProcessBuilder pbProbe = buildHostProcess(
+                        "ffprobe", "-v", "0", "-select_streams", "v:0",
+                        "-show_entries", "stream=width,height,r_frame_rate",
+                        "-of", "csv=p=0", inputPath
+                    );
+                    Process probeProc = pbProbe.start();
+                    java.io.BufferedReader probeReader = new java.io.BufferedReader(
+                        new java.io.InputStreamReader(probeProc.getInputStream())
+                    );
+                    String probeLine = probeReader.readLine();
+                    probeProc.waitFor();
+
+                    if (probeLine == null || probeLine.trim().isEmpty()) {
+                        _fbStreamError = "ffprobe returned no data";
+                        _fbStreamStatus = 5;
+                        return;
+                    }
+
+                    // Parse: "1920,1080,24000/1001"
+                    String[] parts = probeLine.trim().split(",");
+                    if (parts.length < 3) {
+                        _fbStreamError = "ffprobe unexpected format: " + probeLine;
+                        _fbStreamStatus = 5;
+                        return;
+                    }
+                    int srcW = Integer.parseInt(parts[0].trim());
+                    int srcH = Integer.parseInt(parts[1].trim());
+                    String fpsRaw = parts[2].trim();
+
+                    // Parse FPS (may be fraction)
+                    double fps = 24;
+                    if (fpsRaw.contains("/")) {
+                        String[] fp = fpsRaw.split("/");
+                        double num = Double.parseDouble(fp[0]);
+                        double den = Double.parseDouble(fp[1]);
+                        if (den > 0) fps = num / den;
+                    } else {
+                        fps = Double.parseDouble(fpsRaw);
+                    }
+
+                    // 2. Get duration
+                    ProcessBuilder pbDur = buildHostProcess(
+                        "ffprobe", "-v", "0",
+                        "-show_entries", "format=duration",
+                        "-of", "csv=p=0", inputPath
+                    );
+                    Process durProc = pbDur.start();
+                    java.io.BufferedReader durReader = new java.io.BufferedReader(
+                        new java.io.InputStreamReader(durProc.getInputStream())
+                    );
+                    String durLine = durReader.readLine();
+                    durProc.waitFor();
+                    double duration = 0;
+                    if (durLine != null && !durLine.trim().isEmpty()) {
+                        try { duration = Double.parseDouble(durLine.trim()); } catch (Exception ignore) {}
+                    }
+
+                    // 3. Compute scaled dimensions (preserve aspect ratio, round to even)
+                    int scaledW = targetWidth;
+                    int scaledH = (int) Math.round((double) targetWidth * srcH / srcW);
+                    scaledW = scaledW + (scaledW % 2); // ensure even
+                    scaledH = scaledH + (scaledH % 2); // ensure even
+
+                    _fbStreamWidth = scaledW;
+                    _fbStreamHeight = scaledH;
+                    _fbStreamFps = fps;
+                    _fbStreamDuration = duration;
+                    _fbStreamFrameSize = scaledW * scaledH * 4;
+
+                    // 4. Allocate ring buffer
+                    synchronized (_fbStreamLock) {
+                        _fbStreamBuffer = new byte[_fbStreamBufCapacity][];
+                        _fbStreamBufStart = 0;
+                        _fbStreamBufCount = 0;
+                    }
+
+                    _fbStreamStatus = 2; // buffering
+
+                    // 5. Start audio streaming (WAV temp file)
+                    _fbStreamAudioReady = false;
+                    _fbStreamAudioDone = false;
+                    _fbStreamAudioPath = System.getProperty("java.io.tmpdir")
+                        + java.io.File.separator + "pzvp_audio_" + System.currentTimeMillis() + ".wav";
+
+                    _fbStreamAudioThread = new Thread(new Runnable() {
+                        public void run() {
+                            try {
+                                // Write WAV header
+                                java.io.RandomAccessFile wavFile = new java.io.RandomAccessFile(_fbStreamAudioPath, "rw");
+                                int sampleRate = 48000;
+                                int channels = 2;
+                                int bitsPerSample = 16;
+                                int byteRate = sampleRate * channels * bitsPerSample / 8;
+                                int blockAlign = channels * bitsPerSample / 8;
+                                int dataSize = 0x7FFFFFFF; // streaming placeholder
+
+                                // RIFF header
+                                wavFile.writeBytes("RIFF");
+                                wavFile.writeInt(Integer.reverseBytes(dataSize + 36)); // file size - 8
+                                wavFile.writeBytes("WAVE");
+                                // fmt chunk
+                                wavFile.writeBytes("fmt ");
+                                wavFile.writeInt(Integer.reverseBytes(16)); // chunk size
+                                wavFile.writeShort(Short.reverseBytes((short) 1)); // PCM format
+                                wavFile.writeShort(Short.reverseBytes((short) channels));
+                                wavFile.writeInt(Integer.reverseBytes(sampleRate));
+                                wavFile.writeInt(Integer.reverseBytes(byteRate));
+                                wavFile.writeShort(Short.reverseBytes((short) blockAlign));
+                                wavFile.writeShort(Short.reverseBytes((short) bitsPerSample));
+                                // data chunk
+                                wavFile.writeBytes("data");
+                                wavFile.writeInt(Integer.reverseBytes(dataSize));
+
+                                // Start ffmpeg for audio
+                                ProcessBuilder pbAudio = buildHostProcess(
+                                    "ffmpeg", "-i", inputPath,
+                                    "-vn", "-ac", String.valueOf(channels),
+                                    "-ar", String.valueOf(sampleRate),
+                                    "-f", "s16le", "pipe:1"
+                                );
+                                _fbStreamAudioProc = pbAudio.start();
+                                java.io.InputStream audioIn = _fbStreamAudioProc.getInputStream();
+
+                                byte[] audioBuf = new byte[8192];
+                                long totalWritten = 0;
+                                int n;
+                                while ((n = audioIn.read(audioBuf)) != -1) {
+                                    wavFile.write(audioBuf, 0, n);
+                                    totalWritten += n;
+                                    if (!_fbStreamAudioReady && totalWritten >= sampleRate * channels * 2 * 2) {
+                                        // ~2 seconds of audio data
+                                        _fbStreamAudioReady = true;
+                                    }
+                                }
+
+                                // Update WAV header with actual size
+                                long actualDataSize = totalWritten;
+                                wavFile.seek(4);
+                                wavFile.writeInt(Integer.reverseBytes((int)(actualDataSize + 36)));
+                                wavFile.seek(40);
+                                wavFile.writeInt(Integer.reverseBytes((int) actualDataSize));
+                                wavFile.close();
+
+                                _fbStreamAudioDone = true;
+                                if (!_fbStreamAudioReady) _fbStreamAudioReady = true;
+                            } catch (Exception e) {
+                                // Audio failure is non-fatal
+                                _fbStreamAudioDone = true;
+                            }
+                        }
+                    });
+                    _fbStreamAudioThread.setDaemon(true);
+                    _fbStreamAudioThread.start();
+
+                    // 6. Start video streaming
+                    startVideoStream(inputPath, scaledW, scaledH, 0);
+
+                } catch (Exception e) {
+                    _fbStreamError = "Stream start failed: " + e.getMessage();
+                    _fbStreamStatus = 5;
+                }
+            }
+        }).start();
+    }
+
+    private static void startVideoStream(String inputPath, int w, int h, double seekSec) {
+        // Kill existing video process
+        if (_fbStreamVideoProc != null) {
+            _fbStreamVideoProc.destroyForcibly();
+            _fbStreamVideoProc = null;
+        }
+        if (_fbStreamVideoThread != null) {
+            try { _fbStreamVideoThread.join(1000); } catch (Exception ignore) {}
+            _fbStreamVideoThread = null;
+        }
+
+        try {
+            // Build ffmpeg command
+            java.util.ArrayList<String> args = new java.util.ArrayList<>();
+            if (seekSec > 0) {
+                args.add("ffmpeg");
+                args.add("-ss");
+                args.add(String.valueOf(seekSec));
+                args.add("-i");
+                args.add(inputPath);
+            } else {
+                args.add("ffmpeg");
+                args.add("-i");
+                args.add(inputPath);
+            }
+            args.add("-vf");
+            args.add("scale=" + w + ":" + h);
+            args.add("-pix_fmt");
+            args.add("rgba");
+            args.add("-f");
+            args.add("rawvideo");
+            args.add("pipe:1");
+
+            ProcessBuilder pbVideo = buildHostProcess(args.toArray(new String[0]));
+            _fbStreamVideoProc = pbVideo.start();
+
+            final Process proc = _fbStreamVideoProc;
+            final int frameSize = w * h * 4;
+            final int seekFrame = (seekSec > 0) ? (int) Math.floor(seekSec * _fbStreamFps) : 0;
+
+            _fbStreamVideoThread = new Thread(new Runnable() {
+                public void run() {
+                    try {
+                        java.io.InputStream videoIn = proc.getInputStream();
+                        int frameIndex = seekFrame;
+
+                        while (proc.isAlive() || videoIn.available() > 0) {
+                            byte[] frame = new byte[frameSize];
+                            int read = 0;
+                            while (read < frameSize) {
+                                int n = videoIn.read(frame, read, frameSize - read);
+                                if (n == -1) break;
+                                read += n;
+                            }
+                            if (read != frameSize) break; // EOF or incomplete
+
+                            synchronized (_fbStreamLock) {
+                                int slot;
+                                if (_fbStreamBufCount < _fbStreamBufCapacity) {
+                                    slot = (_fbStreamBufStart + _fbStreamBufCount) % _fbStreamBufCapacity;
+                                    _fbStreamBuffer[slot] = frame;
+                                    _fbStreamBufCount++;
+                                } else {
+                                    // Buffer full — overwrite oldest
+                                    slot = _fbStreamBufStart % _fbStreamBufCapacity;
+                                    _fbStreamBuffer[slot] = frame;
+                                    _fbStreamBufStart++;
+                                }
+                            }
+
+                            frameIndex++;
+
+                            // Transition to ready when enough frames buffered
+                            int threshold = (_fbStreamStatus == 2 && seekFrame > 0) ? 30 : 60;
+                            if (_fbStreamBufCount >= threshold && _fbStreamStatus == 2) {
+                                _fbStreamStatus = 3; // ready
+                            }
+                        }
+
+                        // EOF — all frames decoded
+                        if (_fbStreamStatus == 3 || _fbStreamStatus == 2) {
+                            _fbStreamStatus = 4; // done
+                        }
+                    } catch (Exception e) {
+                        if (_fbStreamStatus != 0) { // not stopped
+                            _fbStreamError = "Video read error: " + e.getMessage();
+                            _fbStreamStatus = 5;
+                        }
+                    }
+                }
+            });
+            _fbStreamVideoThread.setDaemon(true);
+            _fbStreamVideoThread.start();
+
+        } catch (Exception e) {
+            _fbStreamError = "Video stream start failed: " + e.getMessage();
+            _fbStreamStatus = 5;
+        }
+    }
+
+    public static boolean fbStreamFrame(zombie.core.textures.Texture tex, int frameIndex) {
+        if (!fbIsReady(tex)) return false;
+        synchronized (_fbStreamLock) {
+            if (_fbStreamBuffer == null || _fbStreamBufCount == 0) return false;
+            if (frameIndex < _fbStreamBufStart || frameIndex >= _fbStreamBufStart + _fbStreamBufCount) {
+                return false;
+            }
+            int slot = (frameIndex - _fbStreamBufStart) % _fbStreamBufCapacity;
+            if (slot < 0) slot += _fbStreamBufCapacity;
+            byte[] data = _fbStreamBuffer[slot];
+            if (data == null) return false;
+
+            final int w = tex.getWidth();
+            final int h = tex.getHeight();
+            final java.nio.ByteBuffer buf = java.nio.ByteBuffer.allocateDirect(data.length);
+            buf.put(data);
+            buf.flip();
+            final int glId = tex.getTextureId().getID();
+            zombie.core.opengl.RenderThread.queueInvokeOnRenderContext(new Runnable() {
+                public void run() {
+                    org.lwjgl.opengl.GL11.glBindTexture(0x0DE1, glId);
+                    org.lwjgl.opengl.GL11.glTexSubImage2D(
+                        0x0DE1, 0, 0, 0, w, h, 0x1908, 0x1401, buf
+                    );
+                }
+            });
+            return true;
+        }
+    }
+
+    public static void fbStreamSeek(double timeSec) {
+        if (_fbStreamInputPath == null || _fbStreamWidth == 0) return;
+        int newStart = (int) Math.floor(timeSec * _fbStreamFps);
+        synchronized (_fbStreamLock) {
+            _fbStreamBufStart = newStart;
+            _fbStreamBufCount = 0;
+        }
+        _fbStreamStatus = 2; // buffering
+        startVideoStream(_fbStreamInputPath, _fbStreamWidth, _fbStreamHeight, timeSec);
+    }
+
+    public static void fbStreamStop() {
+        _fbStreamStatus = 0;
+        if (_fbStreamVideoProc != null) {
+            _fbStreamVideoProc.destroyForcibly();
+            _fbStreamVideoProc = null;
+        }
+        if (_fbStreamAudioProc != null) {
+            _fbStreamAudioProc.destroyForcibly();
+            _fbStreamAudioProc = null;
+        }
+        if (_fbStreamVideoThread != null) {
+            try { _fbStreamVideoThread.join(2000); } catch (Exception ignore) {}
+            _fbStreamVideoThread = null;
+        }
+        if (_fbStreamAudioThread != null) {
+            try { _fbStreamAudioThread.join(2000); } catch (Exception ignore) {}
+            _fbStreamAudioThread = null;
+        }
+        synchronized (_fbStreamLock) {
+            _fbStreamBuffer = null;
+            _fbStreamBufCount = 0;
+            _fbStreamBufStart = 0;
+        }
+        if (_fbStreamAudioPath != null) {
+            try { new java.io.File(_fbStreamAudioPath).delete(); } catch (Exception ignore) {}
+            _fbStreamAudioPath = null;
+        }
+        _fbStreamAudioReady = false;
+        _fbStreamAudioDone = false;
+        _fbStreamInputPath = null;
+        _fbStreamWidth = 0;
+        _fbStreamHeight = 0;
+        _fbStreamError = "";
+    }
+
+    public static int fbStreamStatus() { return _fbStreamStatus; }
+    public static String fbStreamError() { return _fbStreamError; }
+    public static int fbStreamWidth() { return _fbStreamWidth; }
+    public static int fbStreamHeight() { return _fbStreamHeight; }
+    public static double fbStreamFps() { return _fbStreamFps; }
+    public static double fbStreamDuration() { return _fbStreamDuration; }
+    public static String fbStreamAudioPath() { return _fbStreamAudioReady ? _fbStreamAudioPath : ""; }
+    public static boolean fbStreamAudioReady() { return _fbStreamAudioReady; }
+    public static int fbStreamTotalFrames() { return (int) Math.floor(_fbStreamDuration * _fbStreamFps); }
+    public static int fbStreamBufferStart() {
+        synchronized (_fbStreamLock) { return _fbStreamBufStart; }
+    }
+    public static int fbStreamBufferCount() {
+        synchronized (_fbStreamLock) { return _fbStreamBufCount; }
+    }
+
     // === PZFB Utilities ===
 
     public static String fbListDir(String dirPath) {

@@ -259,3 +259,81 @@ function PZFB.readTextFile(path)
     if not PZFB.AVAILABLE then return "" end
     return Color.fbReadTextFile(path)
 end
+
+-- === Streaming Video/Audio Playback ===
+
+function PZFB.streamStart(inputPath, targetWidth)
+    if not PZFB.AVAILABLE then return end
+    Color.fbStreamStart(inputPath, targetWidth)
+end
+
+function PZFB.streamFrame(fb, frameIndex)
+    if not fb or not fb.texture then return false end
+    if not PZFB.AVAILABLE then return false end
+    return Color.fbStreamFrame(fb.texture, frameIndex)
+end
+
+function PZFB.streamSeek(timeSec)
+    if not PZFB.AVAILABLE then return end
+    Color.fbStreamSeek(timeSec)
+end
+
+function PZFB.streamStop()
+    if not PZFB.AVAILABLE then return end
+    Color.fbStreamStop()
+end
+
+function PZFB.streamStatus()
+    if not PZFB.AVAILABLE then return 0 end
+    return Color.fbStreamStatus()
+end
+
+function PZFB.streamError()
+    if not PZFB.AVAILABLE then return "" end
+    return Color.fbStreamError()
+end
+
+function PZFB.streamWidth()
+    if not PZFB.AVAILABLE then return 0 end
+    return Color.fbStreamWidth()
+end
+
+function PZFB.streamHeight()
+    if not PZFB.AVAILABLE then return 0 end
+    return Color.fbStreamHeight()
+end
+
+function PZFB.streamFps()
+    if not PZFB.AVAILABLE then return 24 end
+    return Color.fbStreamFps()
+end
+
+function PZFB.streamDuration()
+    if not PZFB.AVAILABLE then return 0 end
+    return Color.fbStreamDuration()
+end
+
+function PZFB.streamAudioPath()
+    if not PZFB.AVAILABLE then return "" end
+    return Color.fbStreamAudioPath()
+end
+
+function PZFB.streamAudioReady()
+    if not PZFB.AVAILABLE then return false end
+    return Color.fbStreamAudioReady()
+end
+
+function PZFB.streamTotalFrames()
+    if not PZFB.AVAILABLE then return 0 end
+    return Color.fbStreamTotalFrames()
+end
+
+function PZFB.streamBufferStart()
+    if not PZFB.AVAILABLE then return 0 end
+    return Color.fbStreamBufferStart()
+end
+
+function PZFB.streamBufferCount()
+    if not PZFB.AVAILABLE then return 0 end
+    return Color.fbStreamBufferCount()
+end

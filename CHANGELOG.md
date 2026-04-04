@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.3.0 (2026-04-03)
+
+- **Streaming video playback** — zero disk usage for video
+  - `fbStreamStart/Frame/Seek/Stop` — ffmpeg pipes raw frames to in-memory ring buffer
+  - Auto-detects source dimensions, FPS, duration via ffprobe
+  - Aspect-ratio-correct scaling (target width, height computed from source)
+  - ~42-56MB RAM for 300-frame video ring buffer
+- **Streaming audio** — near-instant start (~2 sec), no OGG encoding
+  - ffmpeg decodes audio to raw PCM, Java writes WAV with streaming header
+  - FMOD loads growing WAV file with CREATESTREAM
+  - Full seek support via FMOD (random access within WAV)
+  - Temp WAV (~486MB for 44 min) auto-deleted on stop
+- **Pressure-vessel container support** (Steam Linux Runtime)
+  - Uses host's ld-linux with LD_LIBRARY_PATH from host's ld.so.conf
+  - Clears JVM's LD_PRELOAD for child processes
+  - Reads host's /etc/ld.so.conf for complete library path discovery
+- Lua API wrappers for all stream methods
+- Class file count: 10 (was 6 in v1.2.0)
+
 ## 1.2.0 (2026-04-03)
 
 - **Audio playback via FMOD direct** — bypasses PZ's sound bank system entirely
