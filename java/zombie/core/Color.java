@@ -611,7 +611,7 @@ implements Serializable {
 
     private static final java.util.concurrent.ConcurrentHashMap<zombie.core.textures.Texture, Boolean> _fbState =
         new java.util.concurrent.ConcurrentHashMap<>();
-    private static final String PZFB_VERSION = "1.2.0";
+    private static final String PZFB_VERSION = "1.3.0";
 
     public static String fbPing() {
         return "PZFB " + PZFB_VERSION;
@@ -1129,9 +1129,10 @@ implements Serializable {
     private static final Object _fbStreamLock = new Object();
     private static byte[][] _fbStreamBuffer = null;
     private static int _fbStreamBufCapacity = 300;
-    private static int _fbStreamBufStart = 0;
-    private static int _fbStreamBufCount = 0;
+    private static volatile int _fbStreamBufStart = 0;
+    private static volatile int _fbStreamBufCount = 0;
     private static int _fbStreamFrameSize = 0;
+    private static volatile boolean _fbStreamVideoStop = false; // signal writer thread to exit
 
     // Audio
     private static String _fbStreamAudioPath = null;
@@ -1314,15 +1315,17 @@ implements Serializable {
     }
 
     private static void startVideoStream(String inputPath, int w, int h, double seekSec) {
-        // Kill existing video process
+        // Signal old writer thread to exit
+        _fbStreamVideoStop = true;
         if (_fbStreamVideoProc != null) {
             _fbStreamVideoProc.destroyForcibly();
             _fbStreamVideoProc = null;
         }
         if (_fbStreamVideoThread != null) {
-            try { _fbStreamVideoThread.join(1000); } catch (Exception ignore) {}
+            try { _fbStreamVideoThread.join(2000); } catch (Exception ignore) {}
             _fbStreamVideoThread = null;
         }
+        _fbStreamVideoStop = false;
 
         try {
             // Build ffmpeg command
@@ -1359,12 +1362,13 @@ implements Serializable {
                         java.io.InputStream videoIn = proc.getInputStream();
                         int frameIndex = seekFrame;
 
-                        while (proc.isAlive() || videoIn.available() > 0) {
+                        while (!_fbStreamVideoStop && (proc.isAlive() || videoIn.available() > 0)) {
                             // Wait if buffer is full — throttles ffmpeg to playback speed
                             while (_fbStreamBufCount >= _fbStreamBufCapacity) {
-                                if (_fbStreamStatus == 0) return; // stopped
+                                if (_fbStreamVideoStop) return;
                                 try { Thread.sleep(5); } catch (Exception ignore) {}
                             }
+                            if (_fbStreamVideoStop) return;
 
                             byte[] frame = new byte[frameSize];
                             int read = 0;
@@ -1462,6 +1466,7 @@ implements Serializable {
 
     public static void fbStreamStop() {
         _fbStreamStatus = 0;
+        _fbStreamVideoStop = true;
         if (_fbStreamVideoProc != null) {
             _fbStreamVideoProc.destroyForcibly();
             _fbStreamVideoProc = null;
