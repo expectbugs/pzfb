@@ -344,6 +344,11 @@ function PZFB.streamAudioReady()
     return Color.fbStreamAudioReady()
 end
 
+function PZFB.streamAudioDone()
+    if not PZFB.AVAILABLE then return false end
+    return Color.fbStreamAudioDone()
+end
+
 function PZFB.streamTotalFrames()
     if not PZFB.AVAILABLE then return 0 end
     return Color.fbStreamTotalFrames()

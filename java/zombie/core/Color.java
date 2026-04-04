@@ -1563,6 +1563,7 @@ implements Serializable {
     public static double fbStreamDuration() { return _fbStreamDuration; }
     public static String fbStreamAudioPath() { return _fbStreamAudioReady ? _fbStreamAudioPath : ""; }
     public static boolean fbStreamAudioReady() { return _fbStreamAudioReady; }
+    public static boolean fbStreamAudioDone() { return _fbStreamAudioDone; }
     public static int fbStreamTotalFrames() { return (int) Math.floor(_fbStreamDuration * _fbStreamFps); }
     public static int fbStreamBufferStart() {
         synchronized (_fbStreamLock) { return _fbStreamBufStart; }
