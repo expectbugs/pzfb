@@ -863,10 +863,11 @@ implements Serializable {
 
     // Create a ProcessBuilder that works inside pressure-vessel containers.
     // Uses host dynamic linker + LD_LIBRARY_PATH for host lib directories.
-    private static ProcessBuilder buildHostProcess(String... args) {
+    // mergeStderr: true for commands where we read text output (ffprobe, ffmpeg -version)
+    //             false for streaming where stdout carries binary data (raw video/audio)
+    private static ProcessBuilder buildHostProcess(boolean mergeStderr, String... args) {
         ProcessBuilder pb;
         if (useHostSpawn()) {
-            // Build command: host ld-linux + host binary + original args
             String hostLinker = "/run/host/lib64/ld-linux-x86-64.so.2";
             String hostBin = "/run/host/usr/bin/" + args[0];
             String[] cmd = new String[args.length + 1];
@@ -876,15 +877,23 @@ implements Serializable {
                 cmd[i + 1] = args[i];
             }
             pb = new ProcessBuilder(cmd);
-            // LD_LIBRARY_PATH adds to search (unlike --library-path which replaces).
-            // Read /run/host/etc/ld.so.conf paths + common private lib dirs.
             pb.environment().put("LD_LIBRARY_PATH", buildHostLibPath());
         } else {
             pb = new ProcessBuilder(args);
         }
         pb.environment().remove("LD_PRELOAD");
-        pb.redirectErrorStream(true);
+        if (mergeStderr) {
+            pb.redirectErrorStream(true);
+        } else {
+            // Discard stderr so it doesn't block the process
+            pb.redirectError(ProcessBuilder.Redirect.DISCARD);
+        }
         return pb;
+    }
+
+    // Convenience: merge stderr (for text commands like ffprobe, ffmpeg -version)
+    private static ProcessBuilder buildHostProcess(String... args) {
+        return buildHostProcess(true, args);
     }
 
     // Build comprehensive LD_LIBRARY_PATH from host's /etc/ld.so.conf + common dirs
@@ -1262,8 +1271,8 @@ implements Serializable {
                                 wavFile.writeBytes("data");
                                 wavFile.writeInt(Integer.reverseBytes(dataSize));
 
-                                // Start ffmpeg for audio
-                                ProcessBuilder pbAudio = buildHostProcess(
+                                // Start ffmpeg for audio (mergeStderr=false: stdout carries binary PCM)
+                                ProcessBuilder pbAudio = buildHostProcess(false,
                                     "ffmpeg", "-i", inputPath,
                                     "-vn", "-ac", String.valueOf(channels),
                                     "-ar", String.valueOf(sampleRate),
@@ -1349,7 +1358,8 @@ implements Serializable {
             args.add("rawvideo");
             args.add("pipe:1");
 
-            ProcessBuilder pbVideo = buildHostProcess(args.toArray(new String[0]));
+            // mergeStderr=false: stdout carries binary RGBA frames
+            ProcessBuilder pbVideo = buildHostProcess(false, args.toArray(new String[0]));
             _fbStreamVideoProc = pbVideo.start();
 
             final Process proc = _fbStreamVideoProc;
