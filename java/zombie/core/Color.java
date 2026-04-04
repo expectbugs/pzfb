@@ -1148,9 +1148,10 @@ implements Serializable {
     private static volatile boolean _fbStreamAudioReady = false;
     private static volatile boolean _fbStreamAudioDone = false;
 
-    public static void fbStreamStart(String inputPath, int targetWidth) {
+    public static void fbStreamStart(String inputPath, int targetWidth, int bufferFrames) {
         fbStreamStop();
         _fbStreamInputPath = inputPath;
+        _fbStreamBufCapacity = (bufferFrames > 10) ? bufferFrames : 60;
         _fbStreamStatus = 1; // probing
         _fbStreamError = "";
 

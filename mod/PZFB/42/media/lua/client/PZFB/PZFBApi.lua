@@ -262,9 +262,9 @@ end
 
 -- === Streaming Video/Audio Playback ===
 
-function PZFB.streamStart(inputPath, targetWidth)
+function PZFB.streamStart(inputPath, targetWidth, bufferFrames)
     if not PZFB.AVAILABLE then return end
-    Color.fbStreamStart(inputPath, targetWidth)
+    Color.fbStreamStart(inputPath, targetWidth, bufferFrames or 120)
 end
 
 function PZFB.streamFrame(fb, frameIndex)
