@@ -99,7 +99,7 @@ cp out/zombie/core/Color*.class "$PZ/zombie/core/"
 rm -f "$PZ/zombie/core/Color"*.class
 ```
 
-## Lua API (v1.2.0)
+## Lua API (v1.4.0)
 
 ### Framebuffer (Color.fb* static methods / PZFB.* wrappers):
 ```lua
@@ -142,13 +142,61 @@ PZFB.listDir(path)                     -- Newline-separated filenames
 PZFB.readTextFile(path)                -- Read text file from any path
 ```
 
+### Input System (PZFBInput.lua — ISPanelJoypad subclass):
+```lua
+-- Capture modes:
+PZFBInput.MODE_EXCLUSIVE               -- All keys consumed, game blocked
+PZFBInput.MODE_SELECTIVE               -- Only registered keys consumed
+PZFBInput.MODE_PASSIVE                 -- Read-only, no consumption
+PZFBInput.MODE_FOCUS                   -- Exclusive when mouse over panel
+
+-- Constructor:
+PZFBInputPanel:new(x, y, w, h, {
+    mode, captureToggleKey, escapeCloses, escapeReleasesCapture,
+    playerNum, forceCursorVisible, autoGrab
+})
+
+-- Capture control:
+panel:grabInput() / releaseInput() / isCapturing()
+panel:setMode(mode) / getMode()
+
+-- Keyboard callbacks: onPZFBKeyDown(key), onPZFBKeyRepeat(key), onPZFBKeyUp(key)
+-- Mouse callbacks: onPZFBMouseDown(x,y,btn), onPZFBMouseUp(x,y,btn),
+--                  onPZFBMouseMove(x,y,dx,dy), onPZFBMouseWheel(delta)
+-- Gamepad callbacks: onPZFBGamepadDown(slot,btn), onPZFBGamepadUp(slot,btn),
+--                    onPZFBGamepadAxis(slot,name,val), onPZFBGamepadTrigger(slot,side,pressed)
+
+-- Polling: isKeyDown(key), isModifierDown(name), getMousePos(), isMouseButtonDown(btn)
+--          getGamepadAxis(slot,name), isGamepadDown(slot,btn), isGamepadTriggerDown(slot,side)
+
+-- Action mapping:
+panel:mapAction(name, {key=, gamepad=, axis=, keyNeg=, keyPos=})
+panel:isActionDown(name) / getActionValue(name)
+
+-- Selective capture: captureKey(k), captureBinding(name), releaseAllCaptures()
+-- Input slots: setSlotDevice(slot, type, id), setSlotAutoAssign(slot, bool)
+-- Config: saveInputConfig(name), loadInputConfig(name) → ~/Zomboid/Lua/PZFB_input_*.cfg
+```
+
+### Input System Key Facts (Verified):
+- **Base class is ISPanelJoypad** — provides joypad focus infrastructure
+- **`isKeyConsumed(key)`** is called by Java AFTER `onKeyPress(key)` — both always run, consumption only controls propagation
+- **`GameKeyboard.eatKeyPress(key)`** suppresses the next release event entirely (per-key flag)
+- **`setJoypadFocus(playerNum, self)`** is required to receive PZ-routed gamepad events (sets `joypadData.focus`)
+- **Gamepad callbacks fire from raw polling only** (not PZ-routed) to prevent duplicate events
+- **D-pad is polled via `isJoypadUp/Down/Left/Right(cid)`** — separate from `isJoypadPressed` button polling
+- **`Events.OnKeyPressed` fires on key RELEASE** (not press). `OnKeyStartPressed` fires on press.
+- **`getFileWriter` method is `writeln(str)`** not `writeLine(str)`. `getFileReader` method is `readLine()`.
+- **`Mouse.isButtonDown(btn)`** reads raw HW state — used as fallback for extra mouse button release detection
+- **Safety cleanup** runs on close/hide/remove/player death/main menu return — all route through `_safeRelease()`
+
 ## B42 PZ Lua Sandbox Limitations
 
 - **No `io.*` or `os.*` modules.** Lua is sandboxed.
 - **No `next()`, `rawget(table, number)`, `string.byte()`, `math.huge`** — Kahlua VM limitations.
 - **No `string.format(%g)`, `string.gsub(str, pat, TABLE)`** — Kahlua limitations.
-- **File I/O:** `getFileWriter(filename, createIfNull, append)` and `getFileReader(filename, createIfNull)` write to `~/Zomboid/Lua/`.
-- **Events (verified names):** `Events.EveryOneMinute`, `Events.EveryTenMinutes`, `Events.OnGameStart`, `Events.OnTick`, `Events.OnKeyPressed`
+- **File I/O:** `getFileWriter(filename, createIfNull, append)` and `getFileReader(filename, createIfNull)` write to `~/Zomboid/Lua/`. Writer methods: `writeln(str)`, `write(str)`, `close()`. Reader methods: `readLine()`, `close()`. **NOT `writeLine` — that does not exist.**
+- **Events (verified names):** `Events.EveryOneMinute`, `Events.EveryTenMinutes`, `Events.OnGameStart`, `Events.OnTick`, `Events.OnKeyPressed` (fires on key RELEASE), `Events.OnKeyStartPressed` (fires on press), `Events.OnKeyKeepPressed` (fires while held), `Events.OnPlayerDeath`, `Events.OnMainMenuEnter`
 - **B42 Stats API:** `stats:get(CharacterStat.HUNGER)` not `stats:getHunger()`
 - **All UI APIs verified against B42 client source** — ISPanel, ISCollapsableWindow, ISRichTextPanel, etc.
 

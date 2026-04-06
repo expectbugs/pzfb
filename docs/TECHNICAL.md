@@ -278,27 +278,45 @@ For a proper Steam Workshop release, the mod needs to work without manual file c
 
 The fresh instance should investigate these approaches. The TrueVideo author's approach is the strongest lead — if he claimed Workshop-only distribution, one of these methods works.
 
-## Input Capture Problem
+## Input Capture System (v2.0 — Solved)
 
-### The Problem
-The framebuffer solves OUTPUT (pixels on screen). INPUT (keystrokes to an emulator) is a separate challenge. `Events.OnKeyPressed` gives raw key codes, but:
+### How PZ Keyboard Input Actually Works (Verified from Java Decompile)
 
-1. **Key conflict:** When the player presses arrow keys for an emulator, PZ also moves their character. Keypresses go to BOTH the game and our code. We need to "eat" the keystroke so PZ doesn't see it.
-2. **Key-down/key-up timing:** Emulators expect press/release events. `OnKeyPressed` may only fire on press. Need to investigate `OnKeyStartPressed` vs `OnKeyPressed` and whether there's an `OnKeyReleased`.
-3. **Modifier keys:** Shift, Ctrl, Alt combinations for emulator hotkeys (save state, speed up, etc.)
+The full pipeline, decompiled from `GameKeyboard.java` and `UIElement.java`:
 
-### Approaches to Investigate
+```
+KEY DOWN → GameKeyboard.update() → UIManager.onKeyPress(n)
+  → iterates UI stack TOP-DOWN (last added = highest priority)
+  → for each visible element with wantKeyEvents=true:
+    → Java calls Lua onKeyPress(key)     [ALWAYS runs]
+    → Java calls Lua isKeyConsumed(key)  [if true → consumed, stop walk]
+  → if NOT consumed AND doLuaKeyPressed:
+    → triggers Events.OnKeyStartPressed(key)
+  → always: Events.OnCustomUIKeyPressed(key)
 
-1. **ISTextEntryBox focus model:** PZ's own text entry boxes capture keyboard focus and prevent game input while typing. Study how this works — it's the proven pattern for stealing keyboard from the game. The relevant code is in `ISTextEntryBox` and the Java `UIElement` focus system.
+KEY HELD → UIManager.onKeyRepeat(n)  [same walk with onKeyRepeat]
+KEY UP   → UIManager.onKeyRelease(n) [same walk with onKeyRelease]
+  → if NOT consumed: Events.OnKeyPressed(key)  [NOTE: RELEASE triggers OnKeyPressed!]
+```
 
-2. **Timed action / seated state:** When a character is "using" the terminal furniture, lock them in place like sitting in a vehicle. WASD does nothing in-game, freeing those keys for the emulator. PZ already has this concept for vehicle seats and timed actions.
+Key insight: `onKeyPress(key)` runs BEFORE `isKeyConsumed(key)`. The handler always fires — consumption only controls whether the event propagates further.
 
-3. **Fallback: movement lock + WASD:** At worst, freeze the character in place when the emulator tab is open (simulate sitting at the computer desk like sitting in a dead vehicle) and remap WASD as directional input for the emulator. This works even if we can't fully steal keyboard focus.
+### The Solution: PZFBInputPanel (ISPanelJoypad subclass)
 
-4. **ISPanel:setKeyboardFocus()** or similar — check if UI panels have a method to claim keyboard focus. If so, the emulator tab could grab focus when active and release it when closed.
+`PZFBInput.lua` provides `PZFBInputPanel`, which uses three verified PZ mechanisms:
 
-### What the Fresh Instance Should Do
-Look at how `ISTextEntryBox` steals keyboard focus from the game (verified to work — typing in chat doesn't move the character). Replicate that pattern for the emulator panel. Also check timed actions and vehicle seat states for movement locking.
+1. **`setWantKeyEvents(true)`** — opt into the UIManager key dispatch walk
+2. **`isKeyConsumed(key)` returning true** — prevents key from reaching game bindings and lower UI elements
+3. **`GameKeyboard.eatKeyPress(key)`** — belt-and-suspenders: sets per-key flag that suppresses the next release event entirely
+
+For gamepad: `setJoypadFocus(playerNum, self)` sets `joypadData.focus = self`, routing D-pad and button events to the panel. Raw polling via `isJoypadPressed(cid, n)`, `isJoypadUp/Down/Left/Right(cid)`, and `getJoypadMovementAxisX/Y(cid)` provides frame-accurate analog stick values.
+
+For mouse: ISPanelJoypad's `onMouseDown/Up/Move/Wheel` handlers are overridden. `setCapture(true)` grabs mouse events even when cursor leaves the panel. `setWantExtraMouseEvents(true)` enables middle button and beyond.
+
+### Known PZ Limitations (Verified)
+- **`onMouseButtonUp` (inside panel) does not exist** — only `onMouseButtonUpOutside`. Extra mouse button (2+) releases are detected via raw `Mouse.isButtonDown(btn)` polling in prerender as a fallback.
+- **`Events.OnKeyPressed` fires on key RELEASE**, not press. `OnKeyStartPressed` is the actual press event.
+- **Two keyboards/mice on one machine are not distinguishable** — GLFW/LWJGL sees one keyboard state globally. Multiple controllers + keyboard is the realistic co-op path.
 
 ## Potential Future Enhancements
 

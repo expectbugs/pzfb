@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.4.0 (2026-04-05)
+
+- **Input system v2.0** — complete rewrite of `PZFBInput.lua`
+  - Base class changed from ISPanel to ISPanelJoypad for full gamepad support
+  - Four capture modes: EXCLUSIVE, SELECTIVE, PASSIVE, FOCUS
+  - **Capture toggle key** — user-definable key to lock/unlock input to framebuffer panel
+  - **Keyboard**: `onPZFBKeyDown`, `onPZFBKeyRepeat` (held keys), `onPZFBKeyUp` callbacks + polling
+  - **Mouse**: click, release, move, wheel callbacks with panel-relative coordinates
+  - **Gamepad**: button press/release, analog stick axes, trigger callbacks + polling
+  - **Multi-controller input slots** — keyboard+mouse as slot 1, controllers as slot 2+
+  - **Auto-assign** — controller auto-detection on button press
+  - **Action mapping** — named actions with multiple bindings (keyboard + gamepad + analog axes)
+  - **Selective capture** — consume keys by keycode or game binding name (follows user rebinds)
+  - **Automatic cleanup** — input released on close, hide, remove, player death, or menu return
+  - **Config persistence** — save/load action mappings and settings to `~/Zomboid/Lua/`
+  - Modifier key polling (`isModifierDown("shift"/"ctrl"/"alt")`)
+  - Configurable escape handling (close panel, release capture, or treat as regular key)
+
 ## 1.3.0 (2026-04-03)
 
 - **Streaming video playback** — zero disk usage for video

@@ -366,7 +366,7 @@ local meta = PZFB.readTextFile("/path/to/meta.txt")
 
 ---
 
-## Input Capture
+## Input Capture (v2.0)
 
 ```lua
 require "PZFB/PZFBInput"
@@ -374,95 +374,230 @@ require "PZFB/PZFBInput"
 
 ### `PZFBInputPanel`
 
-ISPanel subclass that captures keyboard input when active. When capturing, the game does not process movement, inventory, or other key bindings.
+ISPanelJoypad subclass providing comprehensive keyboard, mouse, and gamepad input capture. Supports four capture modes, a capture toggle key, action mapping, multi-controller input slots, and automatic cleanup on close/crash.
+
+### Capture Modes
+
+```lua
+PZFBInput.MODE_EXCLUSIVE  -- Consume ALL keys, block game entirely
+PZFBInput.MODE_SELECTIVE  -- Consume only registered keys
+PZFBInput.MODE_PASSIVE    -- Read everything, consume nothing
+PZFBInput.MODE_FOCUS      -- Exclusive when mouse over panel, passive otherwise
+```
 
 ### Constructor
 
 ```lua
-local panel = PZFBInputPanel:new(x, y, width, height)
+local panel = PZFBInputPanel:new(x, y, width, height, {
+    mode              = PZFBInput.MODE_EXCLUSIVE,  -- capture mode
+    captureToggleKey  = nil,          -- nil or Keyboard.KEY_* to toggle capture
+    escapeCloses      = true,         -- ESC closes panel (default true)
+    escapeReleasesCapture = true,     -- ESC releases toggle capture (safety)
+    playerNum         = 0,            -- PZ player number (splitscreen)
+    forceCursorVisible = true,        -- show cursor over panel
+    autoGrab          = false,        -- grab input on createChildren
+})
 panel:initialise()
 panel:addToUIManager()
 ```
 
-### `panel:grabInput()`
+### Capture Control
 
-Start capturing keyboard input. Game controls are blocked while capturing.
+- `panel:grabInput()` — Start capturing input.
+- `panel:releaseInput()` — Stop capturing, release all state.
+- `panel:isCapturing()` — Returns `boolean`.
+- `panel:setMode(mode)` — Change capture mode at runtime.
+- `panel:getMode()` — Returns current mode.
 
-### `panel:releaseInput()`
-
-Stop capturing keyboard input. Game controls resume.
-
-### `panel:isCapturing()`
-
-- **Returns:** `boolean` — whether input capture is active.
-
-### `panel:isKeyDown(key)`
-
-Check if a key is currently held down (polling-style).
-
-- **Parameters:**
-  - `key` (number) — Keyboard constant (e.g. `Keyboard.KEY_LEFT`)
-- **Returns:** `boolean`
-
-### Callbacks
-
-Override these in your subclass or instance for event-driven input:
+### Keyboard Callbacks
 
 ```lua
-function panel:onPZFBKeyPress(key)
-    -- called on key down
-end
-
-function panel:onPZFBKeyRelease(key)
-    -- called on key up
-end
+function panel:onPZFBKeyDown(key) end    -- first frame of key press
+function panel:onPZFBKeyRepeat(key) end  -- every frame while key is held
+function panel:onPZFBKeyUp(key) end      -- key release
 ```
 
-### Full Example
+### Mouse Callbacks
+
+```lua
+function panel:onPZFBMouseDown(x, y, btn) end    -- btn: 0=left, 1=right, 2+=extra
+function panel:onPZFBMouseUp(x, y, btn) end
+function panel:onPZFBMouseMove(x, y, dx, dy) end  -- position (panel-relative) + delta
+function panel:onPZFBMouseWheel(delta) end
+```
+
+### Gamepad Callbacks
+
+```lua
+function panel:onPZFBGamepadDown(slot, button) end   -- Joypad.AButton, DPadUp, etc.
+function panel:onPZFBGamepadUp(slot, button) end
+function panel:onPZFBGamepadAxis(slot, axisName, value) end  -- "leftX","leftY","rightX","rightY"
+function panel:onPZFBGamepadTrigger(slot, side, pressed) end -- "left"/"right"
+function panel:onPZFBCaptureToggle(active) end   -- toggle key state changed
+function panel:onPZFBSlotAssigned(slot, controllerId) end  -- controller auto-assigned
+```
+
+### Keyboard Polling
+
+- `panel:isKeyDown(key)` — Is key currently held?
+- `panel:isModifierDown(name)` — `"shift"`, `"ctrl"`, or `"alt"` (checks both L+R variants).
+
+### Mouse Polling
+
+- `panel:getMousePos()` — Returns `x, y` relative to panel.
+- `panel:isMouseButtonDown(btn)` — 0=left, 1=right, 2=middle.
+
+### Gamepad Polling
+
+- `panel:getGamepadAxis(slot, name)` — Returns `-1.0` to `1.0`. Names: `"leftX"`, `"leftY"`, `"rightX"`, `"rightY"`.
+- `panel:isGamepadDown(slot, button)` — Joypad button constant.
+- `panel:isGamepadTriggerDown(slot, side)` — `"left"` or `"right"`.
+
+### Selective Capture (MODE_SELECTIVE)
+
+Register which keys to consume. Unregistered keys pass through to the game.
+
+```lua
+panel:captureKey(Keyboard.KEY_SPACE)          -- single key
+panel:captureKeys({Keyboard.KEY_LEFT, Keyboard.KEY_RIGHT})  -- batch
+panel:captureBinding("Forward")               -- by game action name (follows rebinds)
+panel:releaseKey(Keyboard.KEY_SPACE)
+panel:releaseBinding("Forward")
+panel:releaseAllCaptures()
+```
+
+### Action Mapping
+
+Map named actions to physical inputs. Multiple bindings per action supported.
+
+```lua
+-- Define
+panel:mapAction("jump", { key = Keyboard.KEY_SPACE })
+panel:mapAction("jump", { gamepad = Joypad.AButton })
+panel:mapAction("moveX", { axis = "leftX" })
+panel:mapAction("moveX", { keyNeg = Keyboard.KEY_A, keyPos = Keyboard.KEY_D })
+panel:unmapAction("jump")
+
+-- Query
+panel:isActionDown("jump")       -- true if ANY binding is active
+panel:getActionValue("moveX")    -- -1.0 to 1.0 (analog-aware)
+```
+
+### Input Slots (Multi-Controller)
+
+```lua
+panel:setSlotDevice(1, "keyboard")          -- slot 1 = keyboard + mouse (default)
+panel:setSlotDevice(2, "controller", 0)     -- slot 2 = controller #0
+panel:setSlotAutoAssign(2, true)            -- auto-assign next controller press
+```
+
+### Config Persistence
+
+Save/load action mappings and settings to `~/Zomboid/Lua/`.
+
+```lua
+panel:saveInputConfig("mymod")    -- writes PZFB_input_mymod.cfg
+panel:loadInputConfig("mymod")    -- reads and applies
+```
+
+### Safety
+
+Input capture is **automatically released** when:
+- Panel is closed (`close()`)
+- Panel is hidden (`setVisible(false)`)
+- Panel is removed (`removeFromUIManager()`)
+- Player dies
+- Game returns to main menu
+
+No manual cleanup needed. `_safeRelease()` is idempotent.
+
+### Full Example — Emulator
 
 ```lua
 require "PZFB/PZFBApi"
 require "PZFB/PZFBInput"
 
-local MyScreen = PZFBInputPanel:derive("MyScreen")
+local EmuScreen = PZFBInputPanel:derive("EmuScreen")
 
-function MyScreen:new(x, y)
-    local o = PZFBInputPanel.new(self, x, y, 512, 512)
+function EmuScreen:new(x, y)
+    local o = PZFBInputPanel.new(self, x, y, 512, 512, {
+        mode = PZFBInput.MODE_EXCLUSIVE,
+        captureToggleKey = Keyboard.KEY_SCROLL,
+        escapeCloses = false,
+    })
     o.fb = nil
     return o
 end
 
-function MyScreen:createChildren()
+function EmuScreen:createChildren()
     PZFBInputPanel.createChildren(self)
     if PZFB.isAvailable() then
         self.fb = PZFB.create(256, 240)
     end
     self:grabInput()
+    -- Map emulator controls
+    self:mapAction("up",    { key = Keyboard.KEY_W, gamepad = Joypad.DPadUp })
+    self:mapAction("down",  { key = Keyboard.KEY_S, gamepad = Joypad.DPadDown })
+    self:mapAction("left",  { key = Keyboard.KEY_A, gamepad = Joypad.DPadLeft })
+    self:mapAction("right", { key = Keyboard.KEY_D, gamepad = Joypad.DPadRight })
+    self:mapAction("a",     { key = Keyboard.KEY_SPACE, gamepad = Joypad.AButton })
+    self:mapAction("b",     { key = Keyboard.KEY_LSHIFT, gamepad = Joypad.BButton })
 end
 
-function MyScreen:render()
+function EmuScreen:render()
     PZFBInputPanel.render(self)
     if self.fb and PZFB.isReady(self.fb) then
         self:drawTextureScaled(PZFB.getTexture(self.fb), 0, 0, 512, 512, 1, 1, 1, 1)
     end
 end
 
-function MyScreen:onPZFBKeyPress(key)
+function EmuScreen:onPZFBKeyDown(key)
     if key == Keyboard.KEY_ESCAPE then
-        self:releaseInput()
-        self:setVisible(false)
-        self:removeFromUIManager()
-        return
+        self:close()
     end
-    -- Handle game input here
 end
 
-function MyScreen:close()
-    if self.fb then
-        PZFB.destroy(self.fb)
-        self.fb = nil
-    end
-    self:releaseInput()
+function EmuScreen:onPZFBCaptureToggle(active)
+    -- Draw border glow or "INPUT LOCKED" indicator
+end
+
+function EmuScreen:close()
+    if self.fb then PZFB.destroy(self.fb) end
+    PZFBInputPanel.close(self)
     self:removeFromUIManager()
+end
+```
+
+### Full Example — Video Player (Selective)
+
+```lua
+local VideoUI = PZFBInputPanel:derive("VideoUI")
+
+function VideoUI:new(x, y)
+    local o = PZFBInputPanel.new(self, x, y, 640, 480, {
+        mode = PZFBInput.MODE_SELECTIVE,
+    })
+    return o
+end
+
+function VideoUI:createChildren()
+    PZFBInputPanel.createChildren(self)
+    self:grabInput()
+    -- Only capture playback keys — WASD still moves character
+    self:captureKey(Keyboard.KEY_SPACE)       -- pause/play
+    self:captureKey(Keyboard.KEY_LEFT)        -- seek back
+    self:captureKey(Keyboard.KEY_RIGHT)       -- seek forward
+    self:captureKey(Keyboard.KEY_UP)          -- volume up
+    self:captureKey(Keyboard.KEY_DOWN)        -- volume down
+end
+
+function VideoUI:onPZFBKeyDown(key)
+    if key == Keyboard.KEY_SPACE then
+        -- toggle pause
+    elseif key == Keyboard.KEY_LEFT then
+        -- seek back 5s
+    elseif key == Keyboard.KEY_RIGHT then
+        -- seek forward 5s
+    end
 end
 ```

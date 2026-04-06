@@ -66,30 +66,39 @@ PZFB.destroy(fb)
 
 ### Input Capture
 
-For interactive content (emulators, games), use `PZFBInputPanel` to steal keyboard focus:
+For interactive content (emulators, games), `PZFBInputPanel` provides full keyboard, mouse, and gamepad capture with four modes:
 
 ```lua
 require "PZFB/PZFBInput"
 
-local panel = PZFBInputPanel:new(100, 100, 512, 512)
+local panel = PZFBInputPanel:new(100, 100, 512, 512, {
+    mode = PZFBInput.MODE_EXCLUSIVE,           -- block all game input
+    captureToggleKey = Keyboard.KEY_SCROLL,    -- press Scroll Lock to toggle capture
+})
 panel:initialise()
 panel:addToUIManager()
-panel:grabInput()  -- WASD no longer moves the character
+panel:grabInput()
 
-function panel:onPZFBKeyPress(key)
-    print("Key pressed: " .. tostring(key))
-end
+-- Event-driven:
+function panel:onPZFBKeyDown(key) print("Down: " .. key) end
+function panel:onPZFBKeyRepeat(key) end  -- fires every frame while held
+function panel:onPZFBKeyUp(key) end
+function panel:onPZFBMouseDown(x, y, btn) end
+function panel:onPZFBGamepadDown(slot, button) end
 
-function panel:onPZFBKeyRelease(key)
-    print("Key released: " .. tostring(key))
-end
-
--- Poll style:
+-- Polling:
 if panel:isKeyDown(Keyboard.KEY_LEFT) then ... end
+local lx = panel:getGamepadAxis(2, "leftX")  -- analog stick
 
--- When done:
-panel:releaseInput()
+-- Action mapping:
+panel:mapAction("jump", { key = Keyboard.KEY_SPACE })
+panel:mapAction("jump", { gamepad = Joypad.AButton })
+if panel:isActionDown("jump") then ... end
+
+-- Input is auto-released on close, hide, player death, or menu return.
 ```
+
+Modes: `MODE_EXCLUSIVE` (all input), `MODE_SELECTIVE` (registered keys only), `MODE_PASSIVE` (read-only), `MODE_FOCUS` (exclusive when mouse over panel). See `docs/API_REFERENCE.md` for full documentation.
 
 ## API Reference
 
@@ -158,6 +167,21 @@ panel:releaseInput()
 |----------|---------|-------------|
 | `PZFB.listDir(path)` | `string` | List files in directory (newline-separated) |
 | `PZFB.readTextFile(path)` | `string` | Read text file from any absolute path |
+
+### Input System
+
+| Feature | API | Description |
+|---------|-----|-------------|
+| Capture modes | `PZFBInput.MODE_EXCLUSIVE/SELECTIVE/PASSIVE/FOCUS` | Control what gets consumed |
+| Toggle key | `captureToggleKey` option | Lock/unlock input to panel with one key |
+| Keyboard | `onPZFBKeyDown/Repeat/Up`, `isKeyDown()` | Full press/hold/release + polling |
+| Mouse | `onPZFBMouseDown/Up/Move/Wheel`, `isMouseButtonDown()` | Click, drag, scroll |
+| Gamepad | `onPZFBGamepadDown/Up`, `getGamepadAxis()` | Buttons, D-pad, analog sticks, triggers |
+| Actions | `mapAction()`, `isActionDown()`, `getActionValue()` | Named actions with multi-input bindings |
+| Multi-controller | `setSlotDevice()`, `setSlotAutoAssign()` | Keyboard+mouse + multiple controllers |
+| Selective capture | `captureKey()`, `captureBinding()` | Consume specific keys or game bindings |
+| Config | `saveInputConfig()`, `loadInputConfig()` | Persist to `~/Zomboid/Lua/` |
+| Auto-cleanup | Automatic | Released on close, hide, death, menu return |
 
 See [docs/API_REFERENCE.md](docs/API_REFERENCE.md) for full documentation.
 
