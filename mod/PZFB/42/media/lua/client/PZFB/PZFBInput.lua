@@ -424,15 +424,17 @@ end
 --- Called by PZ on first frame of key press.
 function PZFBInputPanel:onKeyPress(key)
     if not self._capturing then return end
-    -- FOCUS mode: only process when mouse is over the panel (or toggle is active)
-    if self._mode == PZFBInput.MODE_FOCUS and not self._captureActive and not self:isMouseOver() then return end
 
-    -- Handle capture toggle key (intercept before anything else)
+    -- Handle capture toggle key FIRST — it's a meta-control that works regardless
+    -- of FOCUS mode mouse position. Must be checked before the FOCUS guard.
     if self._captureToggleKey and key == self._captureToggleKey then
         self:_toggleCapture()
         GameKeyboard.eatKeyPress(key)
         return
     end
+
+    -- FOCUS mode: only process regular keys when mouse is over the panel (or toggle is active)
+    if self._mode == PZFBInput.MODE_FOCUS and not self._captureActive and not self:isMouseOver() then return end
 
     -- Handle escape
     if key == Keyboard.KEY_ESCAPE then
