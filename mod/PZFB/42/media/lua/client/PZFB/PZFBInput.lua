@@ -20,6 +20,7 @@
 --   function panel:onPZFBCaptureToggle(active) ... end
 
 require "ISUI/ISPanelJoypad"
+require "ISUI/ISPanel"
 
 -- ============================================================================
 -- Module Constants
@@ -81,6 +82,9 @@ function PZFBInputPanel:new(x, y, width, height, options)
     }
     o._autoAssignSlots = {}
 
+    -- Key proxy (invisible top-level element for key forwarding when we're a child)
+    o._keyProxy = nil
+
     -- Event listener references (for cleanup)
     o._onPlayerDeathFn  = nil
     o._onMainMenuEnterFn = nil
@@ -123,6 +127,11 @@ function PZFBInputPanel:grabInput()
     if self._forceCursorVisible then
         self:setForceCursorVisible(true)
     end
+    -- If we're a child element, UIManager won't dispatch key events to us.
+    -- Create an invisible proxy in UIManager that forwards key events.
+    if self.parent and not self._keyProxy then
+        self:_createKeyProxy()
+    end
 end
 
 function PZFBInputPanel:releaseInput()
@@ -146,6 +155,10 @@ end
 -- ============================================================================
 
 function PZFBInputPanel:_safeRelease()
+    -- Destroy key proxy FIRST (while _capturing is still true, so proxy's
+    -- isKeyConsumed closure returns correct state during removal frame)
+    self:_destroyKeyProxy()
+
     local wasActive = self._captureActive
 
     self._capturing = false
@@ -174,6 +187,7 @@ function PZFBInputPanel:_safeRelease()
 end
 
 function PZFBInputPanel:_removeEventListeners()
+    self:_destroyKeyProxy()
     if self._onPlayerDeathFn then
         Events.OnPlayerDeath.Remove(self._onPlayerDeathFn)
         self._onPlayerDeathFn = nil
@@ -181,6 +195,41 @@ function PZFBInputPanel:_removeEventListeners()
     if self._onMainMenuEnterFn then
         Events.OnMainMenuEnter.Remove(self._onMainMenuEnterFn)
         self._onMainMenuEnterFn = nil
+    end
+end
+
+-- ============================================================================
+-- Key Proxy (for child elements that can't receive key events directly)
+-- UIManager.onKeyPress only dispatches to top-level elements. When we're a
+-- child of another window, this invisible 1x1 proxy sits in UIManager and
+-- forwards key events to us via closures.
+-- ============================================================================
+
+function PZFBInputPanel:_createKeyProxy()
+    local owner = self
+    local proxy = ISPanel:new(0, 0, 1, 1)
+    proxy.background = false
+    proxy:initialise()
+    proxy:instantiate()
+    proxy:setVisible(true)
+    proxy:setWantKeyEvents(true)
+
+    -- Closures capture 'owner' (the real PZFBInputPanel instance).
+    -- Java calls tryGetTableValue("onKeyPress") on proxy's table, finds these,
+    -- invokes with (proxyTable, key). We ignore proxyTable and delegate to owner.
+    proxy.onKeyPress = function(_, key) owner:onKeyPress(key) end
+    proxy.onKeyRelease = function(_, key) owner:onKeyRelease(key) end
+    proxy.onKeyRepeat = function(_, key) owner:onKeyRepeat(key) end
+    proxy.isKeyConsumed = function(_, key) return owner:isKeyConsumed(key) end
+
+    proxy:addToUIManager()
+    self._keyProxy = proxy
+end
+
+function PZFBInputPanel:_destroyKeyProxy()
+    if self._keyProxy then
+        self._keyProxy:removeFromUIManager()
+        self._keyProxy = nil
     end
 end
 
