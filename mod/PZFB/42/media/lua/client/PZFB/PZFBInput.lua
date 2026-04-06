@@ -454,11 +454,6 @@ function PZFBInputPanel:onKeyPress(key)
     -- Track key state
     self._keysDown[key] = true
 
-    -- Eat key if we're consuming it
-    if self:_shouldConsume(key) then
-        GameKeyboard.eatKeyPress(key)
-    end
-
     -- Fire consumer callback
     if self.onPZFBKeyDown then
         self:onPZFBKeyDown(key)
