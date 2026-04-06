@@ -424,6 +424,8 @@ end
 --- Called by PZ on first frame of key press.
 function PZFBInputPanel:onKeyPress(key)
     if not self._capturing then return end
+    -- FOCUS mode: only process when mouse is over the panel (or toggle is active)
+    if self._mode == PZFBInput.MODE_FOCUS and not self._captureActive and not self:isMouseOver() then return end
 
     -- Handle capture toggle key (intercept before anything else)
     if self._captureToggleKey and key == self._captureToggleKey then
@@ -466,6 +468,7 @@ end
 --- Called by PZ every frame while a key is held.
 function PZFBInputPanel:onKeyRepeat(key)
     if not self._capturing then return end
+    if self._mode == PZFBInput.MODE_FOCUS and not self._captureActive and not self:isMouseOver() then return end
 
     -- Don't repeat the toggle key or escape
     if self._captureToggleKey and key == self._captureToggleKey then return end
@@ -478,6 +481,7 @@ end
 --- Called by PZ on key release.
 function PZFBInputPanel:onKeyRelease(key)
     if not self._capturing then return end
+    if self._mode == PZFBInput.MODE_FOCUS and not self._captureActive and not self:isMouseOver() then return end
 
     -- Toggle key release — ignore
     if self._captureToggleKey and key == self._captureToggleKey then return end
