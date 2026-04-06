@@ -468,6 +468,15 @@ function PZFBInputPanel:onKeyRepeat(key)
     -- Don't repeat the toggle key or escape
     if self._captureToggleKey and key == self._captureToggleKey then return end
 
+    -- Ensure key is tracked (handles mouse entering panel while key is already held)
+    if not self._keysDown[key] then
+        self._keysDown[key] = true
+        -- Fire the initial down callback since onKeyPress was blocked by FOCUS guard
+        if self.onPZFBKeyDown then
+            self:onPZFBKeyDown(key)
+        end
+    end
+
     if self.onPZFBKeyRepeat then
         self:onPZFBKeyRepeat(key)
     end
@@ -476,16 +485,20 @@ end
 --- Called by PZ on key release.
 function PZFBInputPanel:onKeyRelease(key)
     if not self._capturing then return end
-    if self._mode == PZFBInput.MODE_FOCUS and not self._captureActive and not self:isMouseOver() then return end
 
     -- Toggle key release — ignore
     if self._captureToggleKey and key == self._captureToggleKey then return end
 
-    -- Update state
+    -- Always clear tracked key state, even if FOCUS guard would skip processing.
+    -- Prevents stuck keys when mouse leaves panel while a key is held.
+    local wasTracked = self._keysDown[key]
     self._keysDown[key] = nil
 
-    -- Fire consumer callback
-    if self.onPZFBKeyUp then
+    -- In FOCUS mode, only fire callbacks when mouse is over the panel
+    if self._mode == PZFBInput.MODE_FOCUS and not self._captureActive and not self:isMouseOver() then return end
+
+    -- Fire consumer callback only if we were tracking this key
+    if wasTracked and self.onPZFBKeyUp then
         self:onPZFBKeyUp(key)
     end
 end
