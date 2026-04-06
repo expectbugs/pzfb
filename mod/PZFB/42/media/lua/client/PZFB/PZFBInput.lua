@@ -72,6 +72,7 @@ function PZFBInputPanel:new(x, y, width, height, options)
     -- Selective capture
     o._capturedKeys     = {}
     o._capturedBindings = {}
+    o._savedBindings    = {}   -- saved game bindings for restore { name = {key,altCode,shift,ctrl,alt} }
 
     -- Action mapping
     o._actions = {}
@@ -132,6 +133,8 @@ function PZFBInputPanel:grabInput()
     if self.parent and not self._keyProxy then
         self:_createKeyProxy()
     end
+    -- Suppress game bindings so isKeyDown(bindingName) returns false
+    self:_suppressBindingsForMode()
 end
 
 function PZFBInputPanel:releaseInput()
@@ -143,7 +146,12 @@ function PZFBInputPanel:isCapturing()
 end
 
 function PZFBInputPanel:setMode(mode)
+    local oldMode = self._mode
     self._mode = mode
+    if self._capturing and oldMode ~= mode then
+        self:_restoreAllBindings()
+        self:_suppressBindingsForMode()
+    end
 end
 
 function PZFBInputPanel:getMode()
@@ -158,6 +166,8 @@ function PZFBInputPanel:_safeRelease()
     -- Destroy key proxy FIRST (while _capturing is still true, so proxy's
     -- isKeyConsumed closure returns correct state during removal frame)
     self:_destroyKeyProxy()
+    -- Restore all suppressed game bindings
+    self:_restoreAllBindings()
 
     local wasActive = self._captureActive
 
@@ -230,6 +240,105 @@ function PZFBInputPanel:_destroyKeyProxy()
     if self._keyProxy then
         self._keyProxy:removeFromUIManager()
         self._keyProxy = nil
+    end
+end
+
+-- ============================================================================
+-- Binding Suppression (block game actions for captured keys)
+-- Game systems poll GameKeyboard.isKeyDown(bindingName) which resolves to raw
+-- key state. We temporarily rebind captured actions to KEY_NONE so the game
+-- sees them as unbound. Saved bindings are restored on release.
+-- ============================================================================
+
+function PZFBInputPanel:_findBindingInMainOptions(bindingName)
+    if MainOptions and MainOptions.keys then
+        for _, bind in ipairs(MainOptions.keys) do
+            if bind.value == bindingName then
+                return bind
+            end
+        end
+    end
+    return nil
+end
+
+function PZFBInputPanel:_suppressBinding(bindingName)
+    if self._savedBindings[bindingName] then return end
+
+    local entry = self:_findBindingInMainOptions(bindingName)
+    if entry then
+        self._savedBindings[bindingName] = {
+            key = entry.key or 0,
+            altCode = entry.altCode or 0,
+            shift = entry.shift or false,
+            ctrl = entry.ctrl or false,
+            alt = entry.alt or false,
+        }
+    else
+        self._savedBindings[bindingName] = {
+            key = getCore():getKey(bindingName),
+            altCode = getCore():getAltKey(bindingName),
+            shift = false, ctrl = false, alt = false,
+        }
+    end
+
+    getCore():addKeyBinding(bindingName, 0, 0, false, false, false)
+end
+
+function PZFBInputPanel:_restoreAllBindings()
+    for name, saved in pairs(self._savedBindings) do
+        getCore():addKeyBinding(name, saved.key, saved.altCode, saved.shift, saved.ctrl, saved.alt)
+    end
+    self._savedBindings = {}
+end
+
+function PZFBInputPanel:_suppressBindingsForKey(keyCode)
+    if MainOptions and MainOptions.keys then
+        for _, bind in ipairs(MainOptions.keys) do
+            if bind.value and not bind.value:match("^%[") then
+                if bind.key == keyCode or bind.altCode == keyCode then
+                    self:_suppressBinding(bind.value)
+                end
+            end
+        end
+    else
+        for _, bind in ipairs(keyBinding) do
+            if bind.value and not bind.value:match("^%[") then
+                local k = getCore():getKey(bind.value)
+                local a = getCore():getAltKey(bind.value)
+                if k == keyCode or a == keyCode then
+                    self:_suppressBinding(bind.value)
+                end
+            end
+        end
+    end
+end
+
+function PZFBInputPanel:_suppressAllBindings()
+    if MainOptions and MainOptions.keys then
+        for _, bind in ipairs(MainOptions.keys) do
+            if bind.value and not bind.value:match("^%[") then
+                self:_suppressBinding(bind.value)
+            end
+        end
+    else
+        for _, bind in ipairs(keyBinding) do
+            if bind.value and not bind.value:match("^%[") then
+                self:_suppressBinding(bind.value)
+            end
+        end
+    end
+end
+
+function PZFBInputPanel:_suppressBindingsForMode()
+    if self._mode == PZFBInput.MODE_EXCLUSIVE or self._mode == PZFBInput.MODE_FOCUS then
+        self:_suppressAllBindings()
+    elseif self._mode == PZFBInput.MODE_SELECTIVE then
+        for keyCode, _ in pairs(self._capturedKeys) do
+            self:_suppressBindingsForKey(keyCode)
+        end
+        for name, _ in pairs(self._capturedBindings) do
+            self:_suppressBinding(name)
+        end
     end
 end
 
@@ -393,8 +502,11 @@ function PZFBInputPanel:_toggleCapture()
                 break
             end
         end
+        -- Toggle override is always exclusive — suppress all bindings
+        self:_restoreAllBindings()
+        self:_suppressAllBindings()
     else
-        -- Releasing capture
+        -- Releasing toggle — revert to base mode suppression
         self._keysDown = {}
         self._mouseButtons = {}
         if self.javaObject then
@@ -408,6 +520,9 @@ function PZFBInputPanel:_toggleCapture()
         if joypadData and joypadData.focus == self then
             setJoypadFocus(self._playerNum, nil)
         end
+        -- Restore all then re-suppress per base mode
+        self:_restoreAllBindings()
+        self:_suppressBindingsForMode()
     end
 
     if self.onPZFBCaptureToggle then
@@ -848,13 +963,16 @@ end
 --- @param keyCode number Keyboard constant
 function PZFBInputPanel:captureKey(keyCode)
     self._capturedKeys[keyCode] = true
+    if self._capturing and self._mode == PZFBInput.MODE_SELECTIVE then
+        self:_suppressBindingsForKey(keyCode)
+    end
 end
 
 --- Capture multiple key codes at once.
 --- @param keys table array of Keyboard constants
 function PZFBInputPanel:captureKeys(keys)
     for _, k in ipairs(keys) do
-        self._capturedKeys[k] = true
+        self:captureKey(k)
     end
 end
 
@@ -863,24 +981,39 @@ end
 --- @param bindingName string e.g. "Forward", "Backward", "Interact"
 function PZFBInputPanel:captureBinding(bindingName)
     self._capturedBindings[bindingName] = true
+    if self._capturing and self._mode == PZFBInput.MODE_SELECTIVE then
+        self:_suppressBinding(bindingName)
+    end
 end
 
 --- Stop capturing a specific key code.
 --- @param keyCode number
 function PZFBInputPanel:releaseKey(keyCode)
     self._capturedKeys[keyCode] = nil
+    if self._capturing then
+        -- Rebuild suppression: restore all, then re-suppress remaining
+        self:_restoreAllBindings()
+        self:_suppressBindingsForMode()
+    end
 end
 
 --- Stop capturing a game binding.
 --- @param bindingName string
 function PZFBInputPanel:releaseBinding(bindingName)
     self._capturedBindings[bindingName] = nil
+    if self._capturing then
+        self:_restoreAllBindings()
+        self:_suppressBindingsForMode()
+    end
 end
 
 --- Clear all selective capture registrations.
 function PZFBInputPanel:releaseAllCaptures()
     self._capturedKeys = {}
     self._capturedBindings = {}
+    if self._capturing then
+        self:_restoreAllBindings()
+    end
 end
 
 -- ============================================================================
