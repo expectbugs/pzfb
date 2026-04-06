@@ -62,6 +62,7 @@ function PZFBInputPanel:new(x, y, width, height, options)
     -- Capture state
     o._capturing     = false
     o._captureActive = false   -- toggle key state
+    o._focusMouseWasOver = false  -- edge detection for FOCUS mode binding suppression
 
     -- Keyboard state
     o._keysDown = {}
@@ -173,6 +174,7 @@ function PZFBInputPanel:_safeRelease()
 
     self._capturing = false
     self._captureActive = false
+    self._focusMouseWasOver = false
 
     -- Clear key state to prevent phantom stuck keys
     self._keysDown = {}
@@ -330,7 +332,7 @@ function PZFBInputPanel:_suppressAllBindings()
 end
 
 function PZFBInputPanel:_suppressBindingsForMode()
-    if self._mode == PZFBInput.MODE_EXCLUSIVE or self._mode == PZFBInput.MODE_FOCUS then
+    if self._mode == PZFBInput.MODE_EXCLUSIVE then
         self:_suppressAllBindings()
     elseif self._mode == PZFBInput.MODE_SELECTIVE then
         for keyCode, _ in pairs(self._capturedKeys) do
@@ -338,6 +340,13 @@ function PZFBInputPanel:_suppressBindingsForMode()
         end
         for name, _ in pairs(self._capturedBindings) do
             self:_suppressBinding(name)
+        end
+    elseif self._mode == PZFBInput.MODE_FOCUS then
+        -- FOCUS mode: suppress only when mouse is over the panel.
+        -- Seed initial state here; prerender handles ongoing transitions.
+        self._focusMouseWasOver = self:isMouseOver()
+        if self._focusMouseWasOver then
+            self:_suppressAllBindings()
         end
     end
 end
@@ -721,6 +730,16 @@ function PZFBInputPanel:prerender()
             if btn >= 2 and not Mouse.isButtonDown(btn) then
                 self._mouseButtons[btn] = nil
             end
+        end
+        -- FOCUS mode: toggle binding suppression on mouse enter/leave
+        if self._mode == PZFBInput.MODE_FOCUS and not self._captureActive then
+            local mouseOver = self:isMouseOver()
+            if mouseOver and not self._focusMouseWasOver then
+                self:_suppressAllBindings()
+            elseif not mouseOver and self._focusMouseWasOver then
+                self:_restoreAllBindings()
+            end
+            self._focusMouseWasOver = mouseOver
         end
         self:_pollGamepads()
     end
