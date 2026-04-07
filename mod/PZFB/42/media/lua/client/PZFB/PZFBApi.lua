@@ -363,3 +363,35 @@ function PZFB.streamBufferCount()
     if not PZFB.AVAILABLE then return 0 end
     return Color.fbStreamBufferCount()
 end
+
+-- === Game process (bidirectional I/O for interactive applications) ===
+
+function PZFB.gameStart(binaryPath, width, height, extraArgs)
+    if not PZFB.AVAILABLE then return end
+    Color.fbGameStart(binaryPath, width, height, extraArgs or "")
+end
+
+function PZFB.gameSendInput(keycode, pressed)
+    if not PZFB.AVAILABLE then return end
+    Color.fbGameSendInput(keycode, pressed)
+end
+
+function PZFB.gameIsRunning()
+    if not PZFB.AVAILABLE then return false end
+    return Color.fbGameIsRunning()
+end
+
+function PZFB.gameStatus()
+    if not PZFB.AVAILABLE then return 0 end
+    return Color.fbGameStatus()
+end
+
+function PZFB.gameError()
+    if not PZFB.AVAILABLE then return "" end
+    return Color.fbGameError()
+end
+
+function PZFB.gameStop()
+    if not PZFB.AVAILABLE then return end
+    Color.fbGameStop()
+end

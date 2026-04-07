@@ -611,7 +611,7 @@ implements Serializable {
 
     private static final java.util.concurrent.ConcurrentHashMap<zombie.core.textures.Texture, Boolean> _fbState =
         new java.util.concurrent.ConcurrentHashMap<>();
-    private static final String PZFB_VERSION = "1.3.0";
+    private static final String PZFB_VERSION = "1.5.0";
 
     public static String fbPing() {
         return "PZFB " + PZFB_VERSION;
@@ -910,7 +910,8 @@ implements Serializable {
         ProcessBuilder pb;
         if (useHostSpawn()) {
             String hostLinker = "/run/host/lib64/ld-linux-x86-64.so.2";
-            String hostBin = "/run/host/usr/bin/" + args[0];
+            // Absolute paths (e.g. game binaries) use as-is; relative names resolve on host
+            String hostBin = args[0].startsWith("/") ? args[0] : "/run/host/usr/bin/" + args[0];
             String[] cmd = new String[args.length + 1];
             cmd[0] = hostLinker;
             cmd[1] = hostBin;
@@ -1190,6 +1191,7 @@ implements Serializable {
     private static volatile boolean _fbStreamAudioDone = false;
 
     public static void fbStreamStart(String inputPath, double qualityScale, int bufferFrames) {
+        fbGameStop();
         fbStreamStop();
         _fbStreamInputPath = inputPath;
         _fbStreamBufCapacity = (bufferFrames > 10) ? bufferFrames : 60;
@@ -1602,6 +1604,186 @@ implements Serializable {
         } catch (Exception e) {
             return "";
         }
+    }
+
+    // === PZFB Game — Bidirectional process I/O for interactive applications ===
+
+    // Game process state
+    private static Process _fbGameProc = null;
+    private static Thread _fbGameReaderThread = null;
+    private static java.io.OutputStream _fbGameStdin = null;
+    private static volatile int _fbGameStatus = 0; // 0=idle 1=starting 2=running 3=exited 4=error
+    private static volatile String _fbGameError = "";
+    private static volatile boolean _fbGameStop = false;
+
+    /**
+     * Launch a game process with bidirectional I/O.
+     * stdout: read into ring buffer as raw RGBA frames (reuses fbStreamFrame for upload)
+     * stdin: writable via fbGameSendInput for keyboard events
+     * Shares the stream ring buffer — cannot run simultaneously with fbStreamStart.
+     *
+     * @param binaryPath Absolute path to the game binary
+     * @param width      Frame width in pixels
+     * @param height     Frame height in pixels
+     * @param extraArgs  Space-separated additional command line arguments
+     */
+    public static void fbGameStart(String binaryPath, int width, int height, String extraArgs) {
+        // Clean up any existing stream or game process
+        fbGameStop();
+        fbStreamStop();
+
+        _fbGameError = "";
+        _fbGameStatus = 1; // starting
+
+        // Fix permissions (Workshop may strip +x)
+        try { new java.io.File(binaryPath).setExecutable(true); } catch (Exception ignore) {}
+
+        // Build args: [binaryPath, ...extraArgs]
+        java.util.ArrayList<String> argList = new java.util.ArrayList<>();
+        argList.add(binaryPath);
+        if (extraArgs != null && !extraArgs.trim().isEmpty()) {
+            for (String a : extraArgs.trim().split("\\s+")) {
+                argList.add(a);
+            }
+        }
+
+        try {
+            // mergeStderr=false: stdout carries binary RGBA frames
+            ProcessBuilder pb = buildHostProcess(false, argList.toArray(new String[0]));
+            _fbGameProc = pb.start();
+            _fbGameStdin = _fbGameProc.getOutputStream();
+
+            // Set up frame dimensions (reuse stream infrastructure)
+            _fbStreamWidth = width;
+            _fbStreamHeight = height;
+            _fbStreamFrameSize = width * height * 4;
+
+            // Allocate ring buffer
+            int capacity = 60; // ~2 seconds at 35fps
+            _fbStreamBufCapacity = capacity;
+            synchronized (_fbStreamLock) {
+                _fbStreamBuffer = new byte[capacity][];
+                _fbStreamBufStart = 0;
+                _fbStreamBufCount = 0;
+            }
+            _fbGameStop = false;
+
+            // Start reader thread — reads frames from stdout into ring buffer
+            final Process proc = _fbGameProc;
+            final int frameSize = _fbStreamFrameSize;
+
+            _fbGameReaderThread = new Thread(new Runnable() {
+                public void run() {
+                    try {
+                        java.io.InputStream in = proc.getInputStream();
+                        int frameIndex = 0;
+
+                        while (!_fbGameStop && (proc.isAlive() || in.available() > 0)) {
+                            // Wait if buffer is full
+                            while (_fbStreamBufCount >= _fbStreamBufCapacity) {
+                                if (_fbGameStop) return;
+                                try { Thread.sleep(5); } catch (Exception ignore) {}
+                            }
+                            if (_fbGameStop) return;
+
+                            // Read one complete frame
+                            byte[] frame = new byte[frameSize];
+                            int read = 0;
+                            while (read < frameSize) {
+                                int n = in.read(frame, read, frameSize - read);
+                                if (n == -1) break;
+                                read += n;
+                            }
+                            if (read != frameSize) break; // EOF or incomplete
+
+                            // Push to ring buffer
+                            synchronized (_fbStreamLock) {
+                                int slot = (_fbStreamBufStart + _fbStreamBufCount) % _fbStreamBufCapacity;
+                                _fbStreamBuffer[slot] = frame;
+                                _fbStreamBufCount++;
+                            }
+                            frameIndex++;
+
+                            // Transition to running after first frame
+                            if (_fbGameStatus == 1 && frameIndex >= 1) {
+                                _fbGameStatus = 2; // running
+                            }
+                        }
+
+                        // Process exited
+                        if (_fbGameStatus != 0) {
+                            _fbGameStatus = 3; // exited
+                        }
+                    } catch (Exception e) {
+                        if (_fbGameStatus != 0) {
+                            _fbGameError = "Game read error: " + e.getMessage();
+                            _fbGameStatus = 4; // error
+                        }
+                    }
+                }
+            });
+            _fbGameReaderThread.setDaemon(true);
+            _fbGameReaderThread.start();
+
+        } catch (Exception e) {
+            _fbGameError = "Game start failed: " + e.getMessage();
+            _fbGameStatus = 4;
+        }
+    }
+
+    /**
+     * Send a key event to the running game process via stdin.
+     * Protocol: 2 bytes [pressed, keycode]
+     */
+    public static void fbGameSendInput(int keycode, int pressed) {
+        java.io.OutputStream os = _fbGameStdin;
+        if (os == null) return;
+        try {
+            synchronized (os) {
+                os.write(pressed & 0xFF);
+                os.write(keycode & 0xFF);
+                os.flush();
+            }
+        } catch (Exception ignore) {
+            // Process may have exited — silently ignore
+        }
+    }
+
+    /** Check if the game process is still alive. */
+    public static boolean fbGameIsRunning() {
+        return _fbGameProc != null && _fbGameProc.isAlive();
+    }
+
+    /** Get game process status: 0=idle 1=starting 2=running 3=exited 4=error */
+    public static int fbGameStatus() { return _fbGameStatus; }
+
+    /** Get error message (empty string if no error). */
+    public static String fbGameError() { return _fbGameError; }
+
+    /** Stop the game process and clean up all resources. */
+    public static void fbGameStop() {
+        _fbGameStop = true;
+        _fbGameStatus = 0;
+        if (_fbGameStdin != null) {
+            try { _fbGameStdin.close(); } catch (Exception ignore) {}
+            _fbGameStdin = null;
+        }
+        if (_fbGameProc != null) {
+            _fbGameProc.destroyForcibly();
+            _fbGameProc = null;
+        }
+        if (_fbGameReaderThread != null) {
+            try { _fbGameReaderThread.join(2000); } catch (Exception ignore) {}
+            _fbGameReaderThread = null;
+        }
+        synchronized (_fbStreamLock) {
+            _fbStreamBuffer = null;
+            _fbStreamBufCount = 0;
+            _fbStreamBufStart = 0;
+        }
+        _fbStreamWidth = 0;
+        _fbStreamHeight = 0;
+        _fbGameError = "";
     }
 
     // === END PZFB EXTENSION ===

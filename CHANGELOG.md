@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.5.0 (2026-04-07)
+
+- **Game process API** — bidirectional process I/O for interactive applications (emulators, games)
+  - `fbGameStart(binaryPath, width, height, extraArgs)` — launch a game binary with stdin/stdout I/O
+  - `fbGameSendInput(keycode, pressed)` — send key events to the game via stdin
+  - `fbGameIsRunning()` — check if game process is alive
+  - `fbGameStatus()` — 0=idle, 1=starting, 2=running, 3=exited, 4=error
+  - `fbGameError()` / `fbGameStop()` — error handling and cleanup
+  - Reuses stream ring buffer — game stdout frames uploaded via `fbStreamFrame()`
+  - **Wire protocol note:** `fbGameSendInput(keycode, pressed)` sends bytes in order `[pressed, keycode]` on the wire (pressed byte first, then keycode byte), despite the Lua parameter order being keycode first
+- **Pressure-vessel fix** — `buildHostProcess` now passes absolute paths through unchanged (previously all paths were prefixed with `/run/host/usr/bin/`, breaking game binaries at absolute paths)
+- **Stream/game mutual exclusion** — `fbStreamStart` now stops any running game process, and `fbGameStart` stops any running stream (shared ring buffer)
+- Lua wrappers: `PZFB.gameStart()`, `gameSendInput()`, `gameIsRunning()`, `gameStatus()`, `gameError()`, `gameStop()`
+- Class file count: 11 (was 10 in v1.3.0)
+
 ## 1.4.0 (2026-04-05)
 
 - **Input system v2.0** — complete rewrite of `PZFBInput.lua`

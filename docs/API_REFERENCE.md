@@ -366,6 +366,81 @@ local meta = PZFB.readTextFile("/path/to/meta.txt")
 
 ---
 
+## Game Process (Interactive Applications)
+
+Launch an external game binary with bidirectional I/O. The game writes raw RGBA frames to stdout (read into the stream ring buffer) and reads key events from stdin. Frames are uploaded to a texture via `PZFB.streamFrame()`.
+
+**Note:** The game API shares the stream ring buffer. It cannot run simultaneously with `PZFB.streamStart()` — starting one stops the other.
+
+### `PZFB.gameStart(binaryPath, width, height, extraArgs)`
+
+Launch a game process.
+
+- **Parameters:**
+  - `binaryPath` (string) — absolute path to the game binary
+  - `width` (number) — frame width in pixels
+  - `height` (number) — frame height in pixels
+  - `extraArgs` (string|nil) — space-separated additional command line arguments
+- **Note:** Automatically sets the binary's execute permission (Workshop may strip +x). Works inside Steam's pressure-vessel container (uses host linker for absolute paths).
+
+### `PZFB.gameSendInput(keycode, pressed)`
+
+Send a key event to the game process via stdin.
+
+- **Parameters:**
+  - `keycode` (number) — key code (0-255)
+  - `pressed` (number) — 1 for pressed, 0 for released
+- **Wire protocol:** Bytes are sent in order `[pressed, keycode]` — the pressed byte is written first, then the keycode byte. This is the **opposite order** from the Lua parameter list. Game binaries reading stdin must read pressed first, then keycode.
+
+### `PZFB.gameIsRunning()`
+
+- **Returns:** `boolean` — true if the game process is alive.
+
+### `PZFB.gameStatus()`
+
+- **Returns:** `number` — 0=idle, 1=starting, 2=running, 3=exited, 4=error
+
+### `PZFB.gameError()`
+
+- **Returns:** `string` — error message, or empty string if no error.
+
+### `PZFB.gameStop()`
+
+Kill the game process and free all resources. Safe to call multiple times.
+
+### Game Example
+
+```lua
+-- Launch a game that outputs 256x240 RGBA frames to stdout
+PZFB.gameStart("/path/to/mygame", 256, 240)
+
+-- Create framebuffer to display frames
+local fb = PZFB.create(256, 240)
+local currentFrame = 0
+
+-- In render():
+if PZFB.gameStatus() >= 2 and fb and PZFB.isReady(fb) then
+    if PZFB.streamFrame(fb, currentFrame) then
+        currentFrame = currentFrame + 1
+    end
+    self:drawTextureScaled(PZFB.getTexture(fb), 0, 0, 512, 480, 1, 1, 1, 1)
+end
+
+-- Send input (from PZFBInputPanel callback):
+function panel:onPZFBKeyDown(key)
+    PZFB.gameSendInput(key, 1)  -- wire: [0x01, key]
+end
+function panel:onPZFBKeyUp(key)
+    PZFB.gameSendInput(key, 0)  -- wire: [0x00, key]
+end
+
+-- Cleanup:
+PZFB.gameStop()
+PZFB.destroy(fb)
+```
+
+---
+
 ## Input Capture (v2.0)
 
 ```lua

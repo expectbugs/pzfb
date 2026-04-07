@@ -168,6 +168,19 @@ Modes: `MODE_EXCLUSIVE` (all input), `MODE_SELECTIVE` (registered keys only), `M
 | `PZFB.listDir(path)` | `string` | List files in directory (newline-separated) |
 | `PZFB.readTextFile(path)` | `string` | Read text file from any absolute path |
 
+### Game Process (Interactive Applications)
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `PZFB.gameStart(path, w, h, extraArgs)` | — | Launch game binary (stdout=RGBA frames, stdin=key events) |
+| `PZFB.gameSendInput(keycode, pressed)` | — | Send key event. **Wire order: [pressed, keycode]** (pressed byte first) |
+| `PZFB.gameIsRunning()` | `boolean` | Check if game process is alive |
+| `PZFB.gameStatus()` | `number` | 0=idle, 1=starting, 2=running, 3=exited, 4=error |
+| `PZFB.gameError()` | `string` | Error message if status==4 |
+| `PZFB.gameStop()` | — | Kill game process, free resources |
+
+Frames are uploaded via `PZFB.streamFrame(fb, frameIndex)` — the game API shares the stream ring buffer. Cannot run simultaneously with `PZFB.streamStart()`.
+
 ### Input System
 
 | Feature | API | Description |

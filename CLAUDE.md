@@ -142,6 +142,18 @@ PZFB.listDir(path)                     -- Newline-separated filenames
 PZFB.readTextFile(path)                -- Read text file from any path
 ```
 
+### Game process (bidirectional I/O for interactive applications):
+```lua
+PZFB.gameStart(binaryPath, w, h, extraArgs) -- Launch game binary, stdout=RGBA frames, stdin=key events
+PZFB.gameSendInput(keycode, pressed)        -- Send key event (wire: [pressed, keycode] — pressed byte first)
+PZFB.gameIsRunning()                        -- Is game process alive?
+PZFB.gameStatus()                           -- 0=idle, 1=starting, 2=running, 3=exited, 4=error
+PZFB.gameError()                            -- Error message string
+PZFB.gameStop()                             -- Kill game process, free resources
+-- Frame upload: use PZFB.streamFrame(fb, frameIndex) — shares ring buffer with stream API
+-- Cannot run simultaneously with PZFB.streamStart (mutual exclusion enforced)
+```
+
 ### Input System (PZFBInput.lua — ISPanelJoypad subclass):
 ```lua
 -- Capture modes:
