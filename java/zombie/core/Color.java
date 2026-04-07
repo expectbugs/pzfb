@@ -1606,6 +1606,22 @@ implements Serializable {
         }
     }
 
+    /** Copy a file from src to dst. Creates parent directories if needed. Returns true on success. */
+    public static boolean fbCopyFile(String src, String dst) {
+        try {
+            java.io.File srcFile = new java.io.File(src);
+            java.io.File dstFile = new java.io.File(dst);
+            if (!srcFile.exists()) return false;
+            java.io.File parent = dstFile.getParentFile();
+            if (parent != null && !parent.exists()) parent.mkdirs();
+            java.nio.file.Files.copy(srcFile.toPath(), dstFile.toPath(),
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     // === PZFB Game — Bidirectional process I/O for interactive applications ===
 
     // Game process state

@@ -364,6 +364,23 @@ Read a text file and return its contents as a string. Useful for reading metadat
 local meta = PZFB.readTextFile("/path/to/meta.txt")
 ```
 
+### `PZFB.copyFile(src, dst)`
+
+Copy a file from any path to any path. Creates parent directories at the destination if they don't exist. Overwrites the destination if it already exists.
+
+- **Parameters:**
+  - `src` (string) — absolute source file path
+  - `dst` (string) — absolute destination file path
+- **Returns:** `boolean` — true if copied successfully, false on error or missing source
+- **Use case:** Deploy binaries from Workshop mods (Steam blocks `.exe` uploads — bundle as `.bin`/`.dat`, copy to a working location at runtime, then launch via `PZFB.gameStart()`).
+
+```lua
+local modDir = "/path/to/workshop/mod"
+local gameDir = Core.getMyDocumentFolder() .. "/PZFB/games"
+PZFB.copyFile(modDir .. "/mygame.dat", gameDir .. "/mygame")
+PZFB.gameStart(gameDir .. "/mygame", 320, 200)
+```
+
 ---
 
 ## Game Process (Interactive Applications)

@@ -167,6 +167,7 @@ Modes: `MODE_EXCLUSIVE` (all input), `MODE_SELECTIVE` (registered keys only), `M
 |----------|---------|-------------|
 | `PZFB.listDir(path)` | `string` | List files in directory (newline-separated) |
 | `PZFB.readTextFile(path)` | `string` | Read text file from any absolute path |
+| `PZFB.copyFile(src, dst)` | `boolean` | Copy file to any path (creates parent dirs) |
 
 ### Game Process (Interactive Applications)
 

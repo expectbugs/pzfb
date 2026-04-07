@@ -140,6 +140,7 @@ PZFB.ffmpegAvailable()                 -- Is ffmpeg on PATH?
 ```lua
 PZFB.listDir(path)                     -- Newline-separated filenames
 PZFB.readTextFile(path)                -- Read text file from any path
+PZFB.copyFile(src, dst)                -- Copy file to any path, creates parent dirs
 ```
 
 ### Game process (bidirectional I/O for interactive applications):

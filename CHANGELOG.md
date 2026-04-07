@@ -2,6 +2,7 @@
 
 ## 1.5.0 (2026-04-07)
 
+- **`fbCopyFile(src, dst)`** — copy any file to any path, creating parent directories. Useful for deploying binaries from Workshop mods (which block `.exe` uploads — bundle as `.bin`/`.dat`, copy at runtime).
 - **Game process API** — bidirectional process I/O for interactive applications (emulators, games)
   - `fbGameStart(binaryPath, width, height, extraArgs)` — launch a game binary with stdin/stdout I/O
   - `fbGameSendInput(keycode, pressed)` — send key events to the game via stdin

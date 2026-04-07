@@ -277,6 +277,15 @@ function PZFB.readTextFile(path)
     return Color.fbReadTextFile(path)
 end
 
+--- Copy a file. Creates parent directories if needed.
+--- @param src string source absolute path
+--- @param dst string destination absolute path
+--- @return boolean true if copied successfully
+function PZFB.copyFile(src, dst)
+    if not PZFB.AVAILABLE then return false end
+    return Color.fbCopyFile(src, dst)
+end
+
 -- === Streaming Video/Audio Playback ===
 
 --- Start streaming video.
