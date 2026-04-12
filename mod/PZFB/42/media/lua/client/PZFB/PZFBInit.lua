@@ -13,10 +13,16 @@ local function checkDeployment()
     local ok, result = pcall(function() return Color.fbPing() end)
     if ok and result then
         PZFB.AVAILABLE = true
-        -- Parse version from ping response ("PZFB 1.0.0")
-        local ver = tostring(result)
-        local v = ver:match("PZFB (.+)")
-        PZFB.VERSION = v or ver
+        -- Read version from mod.info (authoritative, covers Lua-only updates)
+        local modInfo = getModInfoByID("PZFB")
+        if modInfo then
+            PZFB.VERSION = modInfo:getModVersion()
+        end
+        if not PZFB.VERSION or PZFB.VERSION == "" then
+            -- Fallback: parse from ping response ("PZFB 1.0.0")
+            local ver = tostring(result)
+            PZFB.VERSION = ver:match("PZFB (.+)") or ver
+        end
         print("[PZFB] Video Framebuffer v" .. PZFB.VERSION .. " loaded.")
     else
         PZFB.AVAILABLE = false
