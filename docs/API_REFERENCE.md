@@ -495,8 +495,8 @@ panel:addToUIManager()
 
 ### Capture Control
 
-- `panel:grabInput()` — Start capturing input.
-- `panel:releaseInput()` — Stop capturing, release all state.
+- `panel:grabInput()` — Start capturing input. Auto-detects connected controllers, suppresses PZ's gamepad and keyboard binding processing.
+- `panel:releaseInput()` — Stop capturing, restore all state (bindings, gamepad, joypad bind).
 - `panel:isCapturing()` — Returns `boolean`.
 - `panel:setMode(mode)` — Change capture mode at runtime.
 - `panel:getMode()` — Returns current mode.
@@ -528,6 +528,15 @@ function panel:onPZFBGamepadTrigger(slot, side, pressed) end -- "left"/"right"
 function panel:onPZFBCaptureToggle(active) end   -- toggle key state changed
 function panel:onPZFBSlotAssigned(slot, controllerId) end  -- controller auto-assigned
 ```
+
+**PlayStation position remapping:** On PS controllers (DualSense, DualShock), face button
+constants are automatically swapped (A↔B, X↔Y) so they match physical position rather
+than PZ's label-based mapping. Consumers always receive position-correct button constants
+regardless of controller type — no per-mod remapping needed.
+
+**Gamepad suppression:** When capturing (EXCLUSIVE, SELECTIVE, FOCUS+mouse over, or toggle
+active), PZ's own gamepad processing is fully blocked — the game character will not respond
+to the captured controller. Released automatically when capture ends.
 
 ### Keyboard Polling
 
