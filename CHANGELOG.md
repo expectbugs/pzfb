@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.5.1 (2026-04-12)
+
+- **Gamepad auto-detection** — controllers are now automatically detected and assigned to input slots when `grabInput()` is called. Zero configuration required from mod authors.
+  - Scans all 16 GLFW controller slots for connected devices
+  - Seeds initial hardware state to prevent phantom button/axis events
+  - Respects manually-assigned slots (`setSlotDevice`) and auto-assign slots (`setSlotAutoAssign`)
+- **Hot-plug support** — controllers connected/disconnected mid-session are handled automatically via `Events.OnGamepadConnect` / `Events.OnGamepadDisconnect`
+- **New public API: `getConnectedControllers()`** — returns `{id, name}` table for building controller selection UIs
+- **Fix: `_slotForController` fallback** — no longer incorrectly returns keyboard slot (1) when no controller matches; returns nil
+- **Fix: `saveInputConfig` no longer persists auto-detected slots** — only manually-assigned controller slots are saved
+
 ## 1.5.0 (2026-04-07)
 
 - **`fbCopyFile(src, dst)`** — copy any file to any path, creating parent directories. Useful for deploying binaries from Workshop mods (which block `.exe` uploads — bundle as `.bin`/`.dat`, copy at runtime).

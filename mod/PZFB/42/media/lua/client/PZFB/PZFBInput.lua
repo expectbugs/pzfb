@@ -115,6 +115,20 @@ function PZFBInputPanel:createChildren()
     Events.OnPlayerDeath.Add(self._onPlayerDeathFn)
     Events.OnMainMenuEnter.Add(self._onMainMenuEnterFn)
 
+    -- Register gamepad connect/disconnect listeners for hot-plug support
+    self._onGamepadConnectFn = function(cid)
+        if self._capturing then
+            self:_onControllerConnect(cid)
+        end
+    end
+    self._onGamepadDisconnectFn = function(cid)
+        if self._capturing then
+            self:_onControllerDisconnect(cid)
+        end
+    end
+    Events.OnGamepadConnect.Add(self._onGamepadConnectFn)
+    Events.OnGamepadDisconnect.Add(self._onGamepadDisconnectFn)
+
     if self._autoGrab then
         self:grabInput()
     end
@@ -136,6 +150,8 @@ function PZFBInputPanel:grabInput()
     end
     -- Suppress game bindings so isKeyDown(bindingName) returns false
     self:_suppressBindingsForMode()
+    -- Auto-detect connected controllers and create polling slots
+    self:_autoDetectControllers()
 end
 
 function PZFBInputPanel:releaseInput()
@@ -207,6 +223,14 @@ function PZFBInputPanel:_removeEventListeners()
     if self._onMainMenuEnterFn then
         Events.OnMainMenuEnter.Remove(self._onMainMenuEnterFn)
         self._onMainMenuEnterFn = nil
+    end
+    if self._onGamepadConnectFn then
+        Events.OnGamepadConnect.Remove(self._onGamepadConnectFn)
+        self._onGamepadConnectFn = nil
+    end
+    if self._onGamepadDisconnectFn then
+        Events.OnGamepadDisconnect.Remove(self._onGamepadDisconnectFn)
+        self._onGamepadDisconnectFn = nil
     end
 end
 
@@ -347,6 +371,121 @@ function PZFBInputPanel:_suppressBindingsForMode()
         self._focusMouseWasOver = self:isMouseOver()
         if self._focusMouseWasOver then
             self:_suppressAllBindings()
+        end
+    end
+end
+
+-- ============================================================================
+-- Controller Auto-Detection (populate slots from connected hardware)
+-- ============================================================================
+
+function PZFBInputPanel:_autoDetectControllers()
+    -- Remove stale auto-detected slots (disconnected while not capturing)
+    for slotNum, slot in pairs(self._slots) do
+        if slot._autoDetected and slot.controllerId and not isJoypadConnected(slot.controllerId) then
+            self._slots[slotNum] = nil
+        end
+    end
+
+    -- Build set of already-assigned controller IDs
+    local assigned = {}
+    for _, slot in pairs(self._slots) do
+        if slot.device == "controller" and slot.controllerId then
+            assigned[slot.controllerId] = true
+        end
+    end
+
+    -- Scan all 16 GLFW slots for connected controllers
+    for cid = 0, 15 do
+        if not assigned[cid] and isJoypadConnected(cid) then
+            local nextSlot = self:_nextFreeSlot()
+            self._slots[nextSlot] = self:_createControllerSlot(cid, true)
+        end
+    end
+
+    -- Re-seed state on all existing controller slots to prevent phantom events
+    for _, slot in pairs(self._slots) do
+        if slot.device == "controller" and slot.controllerId and isJoypadConnected(slot.controllerId) then
+            self:_seedControllerState(slot)
+        end
+    end
+end
+
+function PZFBInputPanel:_createControllerSlot(cid, autoDetected)
+    local slot = {
+        device = "controller",
+        controllerId = cid,
+        _autoDetected = autoDetected or false,
+        axes = {},
+        triggers = {},
+        buttons = {},
+        dpad = {},
+    }
+    self:_seedControllerState(slot)
+    return slot
+end
+
+function PZFBInputPanel:_seedControllerState(slot)
+    local cid = slot.controllerId
+    if not cid then return end
+
+    -- Seed buttons
+    local buttons = {}
+    local btnCount = getButtonCount(cid)
+    for n = 0, btnCount - 1 do
+        buttons[n] = isJoypadPressed(cid, n)
+    end
+    slot.buttons = buttons
+
+    -- Seed axes
+    slot.axes = {
+        leftX  = getJoypadMovementAxisX(cid),
+        leftY  = getJoypadMovementAxisY(cid),
+        rightX = getJoypadAimingAxisX(cid),
+        rightY = getJoypadAimingAxisY(cid),
+    }
+
+    -- Seed triggers
+    slot.triggers = {
+        left  = isJoypadLTPressed(cid),
+        right = isJoypadRTPressed(cid),
+    }
+
+    -- Seed D-pad
+    slot.dpad = {
+        up    = isJoypadUp(cid),
+        down  = isJoypadDown(cid),
+        left  = isJoypadLeft(cid),
+        right = isJoypadRight(cid),
+    }
+end
+
+function PZFBInputPanel:_nextFreeSlot()
+    local n = 2  -- slot 1 is always keyboard
+    while self._slots[n] or self._autoAssignSlots[n] do
+        n = n + 1
+    end
+    return n
+end
+
+function PZFBInputPanel:_onControllerConnect(cid)
+    -- Check if already in a slot
+    for _, slot in pairs(self._slots) do
+        if slot.device == "controller" and slot.controllerId == cid then
+            return
+        end
+    end
+    -- Create a new auto-detected slot
+    local nextSlot = self:_nextFreeSlot()
+    self._slots[nextSlot] = self:_createControllerSlot(cid, true)
+end
+
+function PZFBInputPanel:_onControllerDisconnect(cid)
+    -- Only remove auto-detected slots; manual ones persist for reconnection
+    for slotNum, slot in pairs(self._slots) do
+        if slot.device == "controller" and slot.controllerId == cid and slot._autoDetected then
+            self._slots[slotNum] = nil
+            break
         end
     end
 end
@@ -728,7 +867,7 @@ function PZFBInputPanel:_slotForController(controllerId)
             return slotNum
         end
     end
-    return 1  -- fallback to slot 1
+    return nil
 end
 
 -- ============================================================================
@@ -944,6 +1083,22 @@ function PZFBInputPanel:isGamepadTriggerDown(slot, side)
         return s.triggers[side] == true
     end
     return false
+end
+
+--- Get list of connected controllers with their IDs and names.
+--- Useful for building controller selection UIs.
+--- @return table array of {id=number, name=string}
+function PZFBInputPanel:getConnectedControllers()
+    local controllers = {}
+    for cid = 0, 15 do
+        if isJoypadConnected(cid) then
+            table.insert(controllers, {
+                id = cid,
+                name = getControllerName(cid),
+            })
+        end
+    end
+    return controllers
 end
 
 -- ============================================================================
@@ -1187,9 +1342,9 @@ function PZFBInputPanel:saveInputConfig(name)
         end
     end
 
-    -- Save slot assignments
+    -- Save slot assignments (manual only — auto-detected slots are transient)
     for slotNum, slot in pairs(self._slots) do
-        if slot.device == "controller" and slot.controllerId then
+        if slot.device == "controller" and slot.controllerId and not slot._autoDetected then
             writer:writeln("[slot." .. tostring(slotNum) .. "]")
             writer:writeln("device=controller")
             writer:writeln("controllerId=" .. tostring(slot.controllerId))

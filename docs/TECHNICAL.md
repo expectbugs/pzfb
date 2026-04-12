@@ -309,7 +309,9 @@ Key insight: `onKeyPress(key)` runs BEFORE `isKeyConsumed(key)`. The handler alw
 2. **`isKeyConsumed(key)` returning true** — prevents key from reaching game bindings and lower UI elements
 3. **`GameKeyboard.eatKeyPress(key)`** — belt-and-suspenders: sets per-key flag that suppresses the next release event entirely
 
-For gamepad: `setJoypadFocus(playerNum, self)` sets `joypadData.focus = self`, routing D-pad and button events to the panel. Raw polling via `isJoypadPressed(cid, n)`, `isJoypadUp/Down/Left/Right(cid)`, and `getJoypadMovementAxisX/Y(cid)` provides frame-accurate analog stick values.
+For gamepad: raw polling via `isJoypadPressed(cid, n)`, `isJoypadUp/Down/Left/Right(cid)`, and `getJoypadMovementAxisX/Y(cid)` provides frame-accurate input. `setJoypadFocus(playerNum, self)` is used as a best-effort for PZ-routed events but is **not required** — raw polling works independently of PZ's joypad focus system.
+
+**Controller auto-detection:** When `grabInput()` is called, all 16 GLFW controller slots are scanned via `isJoypadConnected(cid)`. Connected controllers are assigned to input slots (starting at slot 2) and immediately available for polling. Initial hardware state is seeded into each slot to prevent false press/axis events on the first polling frame. Hot-plug is supported via `Events.OnGamepadConnect` / `Events.OnGamepadDisconnect` listeners. Auto-detected slots are marked with `_autoDetected = true` and excluded from config persistence to avoid stale entries.
 
 For mouse: ISPanelJoypad's `onMouseDown/Up/Move/Wheel` handlers are overridden. `setCapture(true)` grabs mouse events even when cursor leaves the panel. `setWantExtraMouseEvents(true)` enables middle button and beyond.
 

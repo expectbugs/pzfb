@@ -577,7 +577,19 @@ panel:getActionValue("moveX")    -- -1.0 to 1.0 (analog-aware)
 
 ### Input Slots (Multi-Controller)
 
+**Controllers are auto-detected** when `grabInput()` is called. Connected controllers
+are automatically assigned to slots 2+ with no configuration required. Hot-plug is
+supported — controllers connected or disconnected mid-session are handled automatically.
+
 ```lua
+-- Auto-detection (default, zero config):
+panel:grabInput()                           -- scans and assigns all connected controllers
+
+-- Discovery API:
+local controllers = panel:getConnectedControllers()
+-- Returns: { {id=0, name="Xbox Controller"}, {id=1, name="PS5 Controller"}, ... }
+
+-- Manual override (optional, for advanced use):
 panel:setSlotDevice(1, "keyboard")          -- slot 1 = keyboard + mouse (default)
 panel:setSlotDevice(2, "controller", 0)     -- slot 2 = controller #0
 panel:setSlotAutoAssign(2, true)            -- auto-assign next controller press
