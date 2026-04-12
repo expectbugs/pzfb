@@ -313,6 +313,12 @@ For gamepad: raw polling via `isJoypadPressed(cid, n)`, `isJoypadUp/Down/Left/Ri
 
 **Controller auto-detection:** When `grabInput()` is called, all 16 GLFW controller slots are scanned via `isJoypadConnected(cid)`. Connected controllers are assigned to input slots (starting at slot 2) and immediately available for polling. Initial hardware state is seeded into each slot to prevent false press/axis events on the first polling frame. Hot-plug is supported via `Events.OnGamepadConnect` / `Events.OnGamepadDisconnect` listeners. Auto-detected slots are marked with `_autoDetected = true` and excluded from config persistence to avoid stale entries.
 
+**Controller suppression:** When capturing, PZ's own gamepad processing is blocked via three mechanisms: (1) `JoypadState.controllers[cid].connected = false` stops PZ's Lua update loop, (2) `player:setJoypadBind(-1)` stops PZ's Java character movement from reading axes, (3) `JoypadState.controllerTest = true` prevents PZ's joypad activation from re-enabling the bind on button press. All three are enforced per-frame in prerender and restored on release.
+
+**Key consumption:** All consumed keys use `GameKeyboard.eatKeyPress(key)` which skips the entire PZ release path (including `Events.OnKeyPressed` and Java-level debug handlers). Key releases are detected via raw `Keyboard.isKeyDown` polling in prerender.
+
+**PlayStation button remapping:** On PS controllers (detected via `isPlaystationController()` + name/GUID checks for DualSense), face buttons are swapped (A↔B, X↔Y) in `_translateButton` so callbacks deliver position-correct constants matching physical layout.
+
 For mouse: ISPanelJoypad's `onMouseDown/Up/Move/Wheel` handlers are overridden. `setCapture(true)` grabs mouse events even when cursor leaves the panel. `setWantExtraMouseEvents(true)` enables middle button and beyond.
 
 ### Known PZ Limitations (Verified)

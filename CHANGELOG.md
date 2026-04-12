@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.5.2 (2026-04-12)
+
+- **Gamepad suppression** — PZ character no longer responds to captured gamepad input
+  - Three-layer suppression: Lua `connected = false`, Java `setJoypadBind(-1)`, `JoypadState.controllerTest = true`
+  - Per-frame enforcement in prerender prevents PZ's joypad re-activation from overriding suppression
+  - All modes (EXCLUSIVE, SELECTIVE, FOCUS) correctly suppress; PASSIVE correctly does not
+- **Key press consumption via `eatKeyPress`** — ALL captured keys now use `GameKeyboard.eatKeyPress(key)` to prevent any PZ release handling, including `Events.OnKeyPressed` and Java-level debug key handlers (e.g., F7 vehicle texture editor). Key releases detected via raw `Keyboard.isKeyDown` polling in prerender.
+- **PlayStation controller position-based button remapping** — on PS controllers (DualSense, DualShock, etc.), A↔B and X↔Y are swapped in `_translateButton` so `onPZFBGamepadDown` delivers physical-position-correct button constants. Detection via PZ's `isPlaystationController()` plus name/GUID checks for DualSense.
+- **Mouse no longer captured globally in toggle mode** — removed `setCapture(true)` from `_toggleCapture()`, allowing parent window UI (title bar, close button) to remain functional during exclusive capture
+- **SELECTIVE mode gamepad enforcement** — per-frame controller suppression now includes SELECTIVE mode
+
 ## 1.5.1 (2026-04-12)
 
 - **Gamepad auto-detection** — controllers are now automatically detected and assigned to input slots when `grabInput()` is called. Zero configuration required from mod authors.

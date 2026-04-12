@@ -87,6 +87,10 @@ function PZFBInputPanel:new(x, y, width, height, options)
     -- Key proxy (invisible top-level element for key forwarding when we're a child)
     o._keyProxy = nil
 
+    -- Controller suppression state (prevent PZ from polling captured controllers)
+    o._suppressedControllers = {}  -- { [cid] = true } for controllers we've silenced
+    o._savedJoypadBind = nil       -- saved player joypad bind for restore
+
     -- Event listener references (for cleanup)
     o._onPlayerDeathFn  = nil
     o._onMainMenuEnterFn = nil
@@ -152,6 +156,8 @@ function PZFBInputPanel:grabInput()
     self:_suppressBindingsForMode()
     -- Auto-detect connected controllers and create polling slots
     self:_autoDetectControllers()
+    -- Suppress PZ's own polling for our captured controllers
+    self:_suppressControllersForMode()
 end
 
 function PZFBInputPanel:releaseInput()
@@ -185,6 +191,8 @@ function PZFBInputPanel:_safeRelease()
     self:_destroyKeyProxy()
     -- Restore all suppressed game bindings
     self:_restoreAllBindings()
+    -- Restore PZ's controller polling
+    self:_restoreAllControllers()
 
     local wasActive = self._captureActive
 
@@ -488,6 +496,79 @@ function PZFBInputPanel:_onControllerDisconnect(cid)
             break
         end
     end
+    -- Clean up suppression state for this controller
+    self._suppressedControllers[cid] = nil
+end
+
+-- ============================================================================
+-- Controller Suppression (prevent PZ from polling captured controllers)
+-- Analogous to binding suppression for keyboard: we set
+-- JoypadState.controllers[cid].connected = false so PZ's update loop
+-- (JoypadControllerData:update) skips the controller entirely. Our own
+-- raw polling via Java APIs (isJoypadPressed etc.) is unaffected.
+-- ============================================================================
+
+function PZFBInputPanel:_suppressController(cid)
+    if self._suppressedControllers[cid] then return end
+    local controller = JoypadState.controllers[cid]
+    if controller then
+        self._suppressedControllers[cid] = true
+        controller.connected = false
+    end
+    -- Unbind the player's joypad at Java level — stops ALL axis reads for this player.
+    -- checkJoypad(-1) returns null → getJoypadAxis returns 0.0f for everything.
+    if not self._savedJoypadBind then
+        local player = getSpecificPlayer(self._playerNum)
+        if player then
+            local bind = player:getJoypadBind()
+            if bind ~= -1 then
+                self._savedJoypadBind = bind
+                player:setJoypadBind(-1)
+            end
+        end
+    end
+    -- Block PZ's Lua joypad polling AND activation (prevents Java from
+    -- re-setting the joypad bind when it detects a button press).
+    JoypadState.controllerTest = true
+end
+
+function PZFBInputPanel:_restoreAllControllers()
+    for cid, _ in pairs(self._suppressedControllers) do
+        local controller = JoypadState.controllers[cid]
+        if controller then
+            controller.connected = isJoypadConnected(cid)
+        end
+    end
+    self._suppressedControllers = {}
+    -- Restore player's joypad bind
+    if self._savedJoypadBind then
+        local player = getSpecificPlayer(self._playerNum)
+        if player then
+            player:setJoypadBind(self._savedJoypadBind)
+        end
+        self._savedJoypadBind = nil
+    end
+    -- Re-enable PZ's joypad polling and activation
+    JoypadState.controllerTest = false
+end
+
+function PZFBInputPanel:_suppressControllersForMode()
+    if self._mode == PZFBInput.MODE_PASSIVE then
+        return  -- passive never suppresses
+    end
+    -- EXCLUSIVE, SELECTIVE, and FOCUS (when mouse over) all suppress
+    for _, slot in pairs(self._slots) do
+        if slot.device == "controller" and slot.controllerId then
+            if self._mode == PZFBInput.MODE_FOCUS then
+                -- FOCUS mode: only suppress when mouse is over the panel
+                if self:isMouseOver() then
+                    self:_suppressController(slot.controllerId)
+                end
+            else
+                self:_suppressController(slot.controllerId)
+            end
+        end
+    end
 end
 
 -- ============================================================================
@@ -595,6 +676,15 @@ function PZFBInputPanel:onKeyPress(key)
     -- Track key state
     self._keysDown[key] = true
 
+    -- Eat the release event so PZ never processes this key at all.
+    -- eatKeyPress sets a per-key flag that causes the Java keyboard handler to
+    -- skip the entire release path (before Events.OnKeyPressed or any binding
+    -- check). Our onKeyRelease won't fire either — we detect releases ourselves
+    -- in prerender via Keyboard.isKeyDown polling.
+    if self:_shouldConsume(key) then
+        GameKeyboard.eatKeyPress(key)
+    end
+
     -- Fire consumer callback
     if self.onPZFBKeyDown then
         self:onPZFBKeyDown(key)
@@ -654,7 +744,6 @@ function PZFBInputPanel:_toggleCapture()
     if self._captureActive then
         -- Entering exclusive capture
         if self.javaObject then
-            self:setCapture(true)
             self:setForceCursorVisible(true)
         end
         -- Claim joypad focus if a controller is assigned to any slot
@@ -664,15 +753,20 @@ function PZFBInputPanel:_toggleCapture()
                 break
             end
         end
-        -- Toggle override is always exclusive — suppress all bindings
+        -- Toggle override is always exclusive — suppress all bindings + controllers
         self:_restoreAllBindings()
         self:_suppressAllBindings()
+        self:_restoreAllControllers()
+        for _, slot in pairs(self._slots) do
+            if slot.device == "controller" and slot.controllerId then
+                self:_suppressController(slot.controllerId)
+            end
+        end
     else
         -- Releasing toggle — revert to base mode suppression
         self._keysDown = {}
         self._mouseButtons = {}
         if self.javaObject then
-            self:setCapture(false)
             if not self._forceCursorVisible then
                 self:setForceCursorVisible(false)
             end
@@ -685,6 +779,8 @@ function PZFBInputPanel:_toggleCapture()
         -- Restore all then re-suppress per base mode
         self:_restoreAllBindings()
         self:_suppressBindingsForMode()
+        self:_restoreAllControllers()
+        self:_suppressControllersForMode()
     end
 
     if self.onPZFBCaptureToggle then
@@ -877,6 +973,18 @@ end
 function PZFBInputPanel:prerender()
     ISPanelJoypad.prerender(self)
     if self._capturing then
+        -- Detect key releases for eaten keys. eatKeyPress suppresses PZ's release
+        -- handling (preventing bleedthrough to Events.OnKeyPressed), but also
+        -- prevents our onKeyRelease from firing. Poll raw key state to detect
+        -- when the user actually releases the key, and fire the up callback.
+        for key, _ in pairs(self._keysDown) do
+            if not Keyboard.isKeyDown(key) then
+                self._keysDown[key] = nil
+                if self.onPZFBKeyUp then
+                    self:onPZFBKeyUp(key)
+                end
+            end
+        end
         -- Clean up sticky extra mouse buttons (PZ has no onMouseButtonUp for inside)
         -- Mouse.isButtonDown reads raw HW state — if button is physically released, clear it
         for btn, _ in pairs(self._mouseButtons) do
@@ -884,21 +992,60 @@ function PZFBInputPanel:prerender()
                 self._mouseButtons[btn] = nil
             end
         end
-        -- FOCUS mode: toggle binding suppression on mouse enter/leave
+        -- FOCUS mode: toggle binding + controller suppression on mouse enter/leave
         if self._mode == PZFBInput.MODE_FOCUS and not self._captureActive then
             local mouseOver = self:isMouseOver()
             if mouseOver and not self._focusMouseWasOver then
                 self:_suppressAllBindings()
+                for _, slot in pairs(self._slots) do
+                    if slot.device == "controller" and slot.controllerId then
+                        self:_suppressController(slot.controllerId)
+                    end
+                end
             elseif not mouseOver and self._focusMouseWasOver then
                 self:_restoreAllBindings()
+                self:_restoreAllControllers()
             end
             self._focusMouseWasOver = mouseOver
+        end
+        -- Toggle/exclusive capture: enforce controller suppression every frame.
+        -- The one-time suppress in _toggleCapture may get undone by PZ's own
+        -- joypad management; re-applying per-frame ensures it sticks.
+        if self._captureActive or self._mode == PZFBInput.MODE_EXCLUSIVE or self._mode == PZFBInput.MODE_SELECTIVE then
+            for _, slot in pairs(self._slots) do
+                if slot.device == "controller" and slot.controllerId then
+                    if not self._suppressedControllers[slot.controllerId] then
+                        self:_suppressController(slot.controllerId)
+                    end
+                end
+            end
+            -- Also enforce joypad bind suppression
+            if self._savedJoypadBind == nil then
+                local player = getSpecificPlayer(self._playerNum)
+                if player then
+                    local bind = player:getJoypadBind()
+                    if bind ~= -1 then
+                        self._savedJoypadBind = bind
+                        player:setJoypadBind(-1)
+                    end
+                end
+            elseif self._savedJoypadBind then
+                local player = getSpecificPlayer(self._playerNum)
+                if player and player:getJoypadBind() ~= -1 then
+                    player:setJoypadBind(-1)
+                end
+            end
         end
         self:_pollGamepads()
     end
 end
 
 function PZFBInputPanel:_pollGamepads()
+    -- Apply the same mode-awareness as keyboard: in FOCUS mode without toggle,
+    -- only poll when mouse is over the panel. PASSIVE mode always polls (read-only).
+    if self._mode == PZFBInput.MODE_FOCUS and not self._captureActive and not self:isMouseOver() then
+        return
+    end
     for slotNum, slot in pairs(self._slots) do
         if slot.device == "controller" and slot.controllerId then
             local cid = slot.controllerId
@@ -908,6 +1055,7 @@ function PZFBInputPanel:_pollGamepads()
         end
     end
 end
+
 
 function PZFBInputPanel:_pollSingleGamepad(slotNum, slot, cid)
     -- Analog sticks
@@ -990,18 +1138,63 @@ function PZFBInputPanel:_pollSingleGamepad(slotNum, slot, cid)
     end
 end
 
+-- Cache per-controller PlayStation detection (getControllerName is a Java call)
+PZFBInputPanel._psControllerCache = {}
+
+function PZFBInputPanel:_isPlaystationByName(controllerId)
+    local cached = PZFBInputPanel._psControllerCache[controllerId]
+    if cached ~= nil then return cached end
+    -- Check gamepad name (SDL gamecontrollerdb name, e.g. "PS5 Controller")
+    -- Note: getControllerName returns getGamepadName(), NOT getJoystickName().
+    -- PZ's isPlaystationController checks getJoystickName() for "Playstation"/"Dualshock"
+    -- but misses DualSense. We check the gamepad name for broader patterns.
+    local name = string.lower(getControllerName(controllerId) or "")
+    local isPS = string.find(name, "dualsense") ~= nil
+             or string.find(name, "dualshock") ~= nil
+             or string.find(name, "playstation") ~= nil
+             or string.find(name, "sony") ~= nil
+             or string.find(name, "ps3") ~= nil
+             or string.find(name, "ps4") ~= nil
+             or string.find(name, "ps5") ~= nil
+    -- Also check GUID for Sony vendor ID (054c → "4c05" little-endian in GUID)
+    if not isPS then
+        local guid = string.lower(getControllerGUID(controllerId) or "")
+        isPS = string.find(guid, "4c05") ~= nil
+    end
+    PZFBInputPanel._psControllerCache[controllerId] = isPS
+    return isPS
+end
+
 function PZFBInputPanel:_translateButton(controllerId, rawIndex)
-    if rawIndex == getJoypadAButton(controllerId) then return Joypad.AButton end
-    if rawIndex == getJoypadBButton(controllerId) then return Joypad.BButton end
-    if rawIndex == getJoypadXButton(controllerId) then return Joypad.XButton end
-    if rawIndex == getJoypadYButton(controllerId) then return Joypad.YButton end
-    if rawIndex == getJoypadLBumper(controllerId) then return Joypad.LBumper end
-    if rawIndex == getJoypadRBumper(controllerId) then return Joypad.RBumper end
-    if rawIndex == getJoypadBackButton(controllerId) then return Joypad.Back end
-    if rawIndex == getJoypadStartButton(controllerId) then return Joypad.Start end
-    if rawIndex == getJoypadLeftStickButton(controllerId) then return Joypad.LStickButton end
-    if rawIndex == getJoypadRightStickButton(controllerId) then return Joypad.RStickButton end
-    return Joypad.Other
+    -- Translate raw button index to Joypad constant, then apply position-based
+    -- remapping for PlayStation controllers. PZ maps by label (A=confirm=Cross,
+    -- B=back=Circle) but games expect physical position (A=east, B=south).
+    -- On PS controllers, Cross is south and Circle is east — opposite of the
+    -- Joypad.AButton/BButton semantic meaning. Swap A↔B and X↔Y so consumers
+    -- always receive position-correct button constants.
+    local mapped = Joypad.Other
+    if rawIndex == getJoypadAButton(controllerId) then mapped = Joypad.AButton
+    elseif rawIndex == getJoypadBButton(controllerId) then mapped = Joypad.BButton
+    elseif rawIndex == getJoypadXButton(controllerId) then mapped = Joypad.XButton
+    elseif rawIndex == getJoypadYButton(controllerId) then mapped = Joypad.YButton
+    elseif rawIndex == getJoypadLBumper(controllerId) then mapped = Joypad.LBumper
+    elseif rawIndex == getJoypadRBumper(controllerId) then mapped = Joypad.RBumper
+    elseif rawIndex == getJoypadBackButton(controllerId) then mapped = Joypad.Back
+    elseif rawIndex == getJoypadStartButton(controllerId) then mapped = Joypad.Start
+    elseif rawIndex == getJoypadLeftStickButton(controllerId) then mapped = Joypad.LStickButton
+    elseif rawIndex == getJoypadRightStickButton(controllerId) then mapped = Joypad.RStickButton
+    end
+    -- Position remap for PlayStation controllers (Cross↔Circle, Square↔Triangle).
+    -- PZ's isPlaystationController only checks "Playstation"/"Dualshock" but misses
+    -- DualSense controllers. Also check the controller name for "DualSense".
+    if mapped ~= Joypad.Other and (isPlaystationController(controllerId) or self:_isPlaystationByName(controllerId)) then
+        if mapped == Joypad.AButton then mapped = Joypad.BButton
+        elseif mapped == Joypad.BButton then mapped = Joypad.AButton
+        elseif mapped == Joypad.XButton then mapped = Joypad.YButton
+        elseif mapped == Joypad.YButton then mapped = Joypad.XButton
+        end
+    end
+    return mapped
 end
 
 -- ============================================================================
