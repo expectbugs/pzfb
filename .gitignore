@@ -1,6 +1,7 @@
 build/
 *.class
 !class_files/*.class
+!mod/PZFB/class_files/*.class
 venv/
 __pycache__/
 *.pyc
