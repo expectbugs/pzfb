@@ -938,6 +938,55 @@ implements Serializable {
         return buildHostProcess(true, args);
     }
 
+    // Split a command-line string by whitespace, respecting "..." quoted tokens.
+    // Backward compatible: unquoted strings split identically to String.split("\\s+").
+    private static java.util.List<String> splitQuotedArgs(String s) {
+        java.util.ArrayList<String> args = new java.util.ArrayList<>();
+        int len = s.length();
+        int i = 0;
+        while (i < len) {
+            while (i < len && Character.isWhitespace(s.charAt(i))) i++;
+            if (i >= len) break;
+            StringBuilder arg = new StringBuilder();
+            if (s.charAt(i) == '"') {
+                i++; // skip opening quote
+                while (i < len && s.charAt(i) != '"') { arg.append(s.charAt(i)); i++; }
+                if (i < len) i++; // skip closing quote
+            } else {
+                while (i < len && !Character.isWhitespace(s.charAt(i))) { arg.append(s.charAt(i)); i++; }
+            }
+            if (arg.length() > 0) args.add(arg.toString());
+        }
+        return args;
+    }
+
+    // Read last N non-empty lines from a file (for stderr diagnostics).
+    private static String readLastLines(java.io.File f, int maxLines) {
+        if (f == null || !f.exists() || f.length() == 0) return "";
+        try {
+            byte[] data = java.nio.file.Files.readAllBytes(f.toPath());
+            if (data.length > 8192) {
+                byte[] tail = new byte[8192];
+                System.arraycopy(data, data.length - 8192, tail, 0, 8192);
+                data = tail;
+            }
+            String text = new String(data, java.nio.charset.StandardCharsets.UTF_8);
+            String[] lines = text.split("\\r?\\n");
+            StringBuilder sb = new StringBuilder();
+            int start = Math.max(0, lines.length - maxLines);
+            for (int j = start; j < lines.length; j++) {
+                String line = lines[j].trim();
+                if (!line.isEmpty()) {
+                    if (sb.length() > 0) sb.append("; ");
+                    sb.append(line);
+                }
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
     // Build comprehensive LD_LIBRARY_PATH from host's /etc/ld.so.conf + common dirs
     private static String _cachedHostLibPath = null;
     private static String buildHostLibPath() {
@@ -1631,6 +1680,7 @@ implements Serializable {
     private static volatile int _fbGameStatus = 0; // 0=idle 1=starting 2=running 3=exited 4=error
     private static volatile String _fbGameError = "";
     private static volatile boolean _fbGameStop = false;
+    private static java.io.File _fbGameStderrLog = null;
 
     /**
      * Launch a game process with bidirectional I/O.
@@ -1641,7 +1691,7 @@ implements Serializable {
      * @param binaryPath Absolute path to the game binary
      * @param width      Frame width in pixels
      * @param height     Frame height in pixels
-     * @param extraArgs  Space-separated additional command line arguments
+     * @param extraArgs  Additional command line arguments (space-separated; use "quotes" for paths with spaces)
      */
     public static void fbGameStart(String binaryPath, int width, int height, String extraArgs) {
         // Clean up any existing stream or game process
@@ -1655,10 +1705,11 @@ implements Serializable {
         try { new java.io.File(binaryPath).setExecutable(true); } catch (Exception ignore) {}
 
         // Build args: [binaryPath, ...extraArgs]
+        // Uses quote-aware splitting so paths with spaces work when quoted
         java.util.ArrayList<String> argList = new java.util.ArrayList<>();
         argList.add(binaryPath);
         if (extraArgs != null && !extraArgs.trim().isEmpty()) {
-            for (String a : extraArgs.trim().split("\\s+")) {
+            for (String a : splitQuotedArgs(extraArgs)) {
                 argList.add(a);
             }
         }
@@ -1666,6 +1717,23 @@ implements Serializable {
         try {
             // mergeStderr=false: stdout carries binary RGBA frames
             ProcessBuilder pb = buildHostProcess(false, argList.toArray(new String[0]));
+
+            // Set working directory to binary's parent (ensures DLLs are found,
+            // config files can be written, and avoids UAC issues on Windows)
+            java.io.File binDir = new java.io.File(binaryPath).getParentFile();
+            if (binDir != null && binDir.isDirectory()) {
+                pb.directory(binDir);
+            }
+
+            // Capture stderr to temp file for diagnostics (overrides DISCARD from buildHostProcess)
+            try {
+                _fbGameStderrLog = java.io.File.createTempFile("pzfb_game_", ".log");
+                _fbGameStderrLog.deleteOnExit();
+                pb.redirectError(_fbGameStderrLog);
+            } catch (Exception ignore) {
+                // Fall through with DISCARD if temp file creation fails
+            }
+
             _fbGameProc = pb.start();
             _fbGameStdin = _fbGameProc.getOutputStream();
 
@@ -1728,7 +1796,17 @@ implements Serializable {
 
                         // Process exited
                         if (_fbGameStatus != 0) {
-                            _fbGameStatus = 3; // exited
+                            if (frameIndex == 0) {
+                                // Never produced a frame — report as error with diagnostics
+                                int exitCode = -1;
+                                try { exitCode = proc.waitFor(); } catch (Exception ignore) {}
+                                String detail = readLastLines(_fbGameStderrLog, 5);
+                                _fbGameError = "Process exited immediately (code " + exitCode + ")";
+                                if (!detail.isEmpty()) _fbGameError += ": " + detail;
+                                _fbGameStatus = 4; // error
+                            } else {
+                                _fbGameStatus = 3; // normal exit
+                            }
                         }
                     } catch (Exception e) {
                         if (_fbGameStatus != 0) {
@@ -1800,6 +1878,10 @@ implements Serializable {
         _fbStreamWidth = 0;
         _fbStreamHeight = 0;
         _fbGameError = "";
+        if (_fbGameStderrLog != null) {
+            try { _fbGameStderrLog.delete(); } catch (Exception ignore) {}
+            _fbGameStderrLog = null;
+        }
     }
 
     // === END PZFB EXTENSION ===
