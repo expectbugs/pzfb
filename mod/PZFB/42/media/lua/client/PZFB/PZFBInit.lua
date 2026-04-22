@@ -69,7 +69,7 @@ local function generateInstallScript()
     local datFiles = {
         "Color.dat", "Color$1.dat", "Color$2.dat", "Color$3.dat",
         "Color$4.dat", "Color$5.dat", "Color$6.dat", "Color$6$1.dat",
-        "Color$7.dat", "Color$8.dat", "Color$9.dat",
+        "Color$7.dat", "Color$8.dat", "Color$9.dat", "Color$10.dat",
     }
 
     if isWindows() then
@@ -192,7 +192,22 @@ local function checkDeployment()
             local ver = tostring(result)
             PZFB.VERSION = ver:match("PZFB (.+)") or ver
         end
-        print("[PZFB] Video Framebuffer v" .. PZFB.VERSION .. " loaded.")
+        -- Compare the class-file's reported version to the mod.info version.
+        -- A mismatch means Workshop pushed new mod files but the user hasn't
+        -- re-run the install script yet — the deployed bytecode is stale.
+        local pingVer = tostring(result):match("PZFB (.+)") or ""
+        PZFB._classVersion = pingVer
+        if pingVer ~= "" and PZFB.VERSION and pingVer ~= PZFB.VERSION then
+            PZFB._needsUpdate = true
+            PZFB._installScript = generateInstallScript()
+            print("[PZFB] Video Framebuffer v" .. PZFB.VERSION
+                  .. " — class files out of date (v" .. pingVer .. ").")
+            if PZFB._installScript then
+                print("[PZFB] Install script regenerated: ~/Zomboid/Lua/" .. PZFB._installScript)
+            end
+        else
+            print("[PZFB] Video Framebuffer v" .. PZFB.VERSION .. " loaded.")
+        end
     else
         PZFB.AVAILABLE = false
         -- Generate install script for user
@@ -213,8 +228,11 @@ local function checkDeployment()
 end
 
 local function showInstallPrompt()
-    if PZFB.AVAILABLE then return end
+    -- Show when class files are missing (first install) OR when class files
+    -- are stale relative to the mod version (post-Workshop-update re-install).
+    if PZFB.AVAILABLE and not PZFB._needsUpdate then return end
 
+    local upgrade = PZFB._needsUpdate == true
     local w = 540
     local h = 230
     local sx = (getCore():getScreenWidth() - w) / 2
@@ -224,27 +242,40 @@ local function showInstallPrompt()
     panel:initialise()
     panel.background = true
     panel.backgroundColor = {r = 0.1, g = 0.1, b = 0.1, a = 0.95}
-    panel.borderColor = {r = 0.6, g = 0.2, b = 0.2, a = 1}
+    -- Orange border for upgrade, red for first-install
+    if upgrade then
+        panel.borderColor = {r = 0.7, g = 0.45, b = 0.15, a = 1}
+    else
+        panel.borderColor = {r = 0.6, g = 0.2, b = 0.2, a = 1}
+    end
     panel.moveWithMouse = true
 
     local scriptName = PZFB._installScript
+    local classVer = PZFB._classVersion or "?"
+    local modVer   = PZFB.VERSION or "?"
     panel.render = function(self)
         ISPanel.render(self)
-        self:drawText("Video Framebuffer - Setup Required",
-            20, 15, 1, 0.4, 0.4, 1, UIFont.Medium)
-        self:drawText("PZFB class files are not installed.",
-            20, 55, 1, 1, 1, 1, UIFont.Small)
+        if upgrade then
+            self:drawText("Video Framebuffer - Update Required",
+                20, 15, 1, 0.7, 0.3, 1, UIFont.Medium)
+            self:drawText("Class files are out of date (installed v" .. classVer
+                          .. ", mod v" .. modVer .. ").",
+                20, 55, 1, 1, 1, 1, UIFont.Small)
+        else
+            self:drawText("Video Framebuffer - Setup Required",
+                20, 15, 1, 0.4, 0.4, 1, UIFont.Medium)
+            self:drawText("PZFB class files are not installed.",
+                20, 55, 1, 1, 1, 1, UIFont.Small)
+        end
         if scriptName then
+            local verb = upgrade and "Re-run the install script:" or "An install script has been created for you:"
+            self:drawText(verb, 20, 80, 0.8, 0.8, 0.8, 1, UIFont.Small)
             if isWindows() then
-                self:drawText("An install script has been created for you:",
-                    20, 80, 0.8, 0.8, 0.8, 1, UIFont.Small)
                 self:drawText("Open your Zomboid\\Lua folder and double-click:",
                     20, 100, 0.8, 0.8, 0.8, 1, UIFont.Small)
                 self:drawText(scriptName,
                     40, 120, 0.5, 1, 0.5, 1, UIFont.Small)
             else
-                self:drawText("An install script has been created. Run in terminal:",
-                    20, 80, 0.8, 0.8, 0.8, 1, UIFont.Small)
                 self:drawText("bash ~/Zomboid/Lua/" .. scriptName,
                     40, 100, 0.5, 1, 0.5, 1, UIFont.Small)
             end

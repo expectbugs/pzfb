@@ -391,7 +391,7 @@ Launch an external game binary with bidirectional I/O. The game writes raw RGBA 
 
 ### `PZFB.gameStart(binaryPath, width, height, extraArgs)`
 
-Launch a game process.
+Launch a game process. Legacy string-based form.
 
 - **Parameters:**
   - `binaryPath` (string) — absolute path to the game binary
@@ -399,6 +399,32 @@ Launch a game process.
   - `height` (number) — frame height in pixels
   - `extraArgs` (string|nil) — space-separated additional command line arguments
 - **Note:** Automatically sets the binary's execute permission (Workshop may strip +x). Works inside Steam's pressure-vessel container (uses host linker for absolute paths).
+
+> **Important:** `extraArgs` is a single whitespace-separated string. Arguments containing spaces MUST be wrapped in double quotes: `"path with spaces"`. The splitter handles `"..."` only — no nested quotes, no backslash escapes, no single quotes. For any argument derived from user input (ROM paths, Documents folder, usernames with spaces or Unicode), **prefer `PZFB.gameStartArgs()` (1.7.0+)** which bypasses parsing entirely.
+
+### `PZFB.gameStartArgs(binaryPath, width, height, argv)` *(1.7.0+)*
+
+Launch a game process with an argv array. Preferred form for any argument that may contain spaces, quotes, backslashes, or non-ASCII characters.
+
+- **Parameters:**
+  - `binaryPath` (string) — absolute path to the game binary
+  - `width` (number) — frame width in pixels
+  - `height` (number) — frame height in pixels
+  - `argv` (table|nil) — Lua array (1-based integer keys) of string arguments; each element is passed to the child process verbatim. `nil` and empty table both mean "no extra args".
+- **Behaviour:** Identical to `PZFB.gameStart()` once the child process is running — same stdout/stdin wiring, same status states, same `gameSendInput`/`gameStatus`/`gameStop` lifecycle.
+- **Why use this:** Windows usernames with spaces (`C:\Users\Adam Marzello\...`), OneDrive-redirected Documents folders, apostrophes in paths (`O'Brien`), Cyrillic/CJK/accented-Latin usernames all pass through unchanged. No quoting, no escaping.
+
+```lua
+-- Compose argv from any user-supplied strings without worrying about escaping:
+PZFB.gameStartArgs(binaryPath, 256, 240, {
+    corePath,                -- e.g. "C:/Users/Adam Marzello/Documents/Zomboid/PZEMU/fceumm_libretro.dll"
+    romPath,                 -- e.g. "C:/Users/Adam Marzello/Documents/Zomboid/PZEMU/roms/nes/Super Mario.nes"
+    tostring(width),
+    tostring(height),
+    saveDir,
+    saveDir,
+})
+```
 
 ### `PZFB.gameSendInput(keycode, pressed)`
 
@@ -424,6 +450,12 @@ Send a key event to the game process via stdin.
 ### `PZFB.gameStop()`
 
 Kill the game process and free all resources. Safe to call multiple times.
+
+> **Auto-cleanup (1.7.0+):** `gameStop()` is also invoked automatically by a JVM shutdown hook when PZ exits normally, so consumers don't need to call it in every exit path. Caveat: the hook does not run on SIGKILL, power loss, or Windows Task Manager "End task" — for those cases, the child process will still survive until next PZ launch (where `gameStart()` will reclaim its place in the ring buffer, but the orphan is only cleaned up by a separate PZ restart + consumer mod initialization path today).
+
+### Multiplayer considerations
+
+The Game Process API is **client-local**. Each player's PZ spawns its own child process on its own machine, and frames are never transported over PZ's network protocol. A consumer showing the same in-world TV to two players will render independent frame streams — if both walk up to the same NES and press "Play", each sees the frames produced by their own bridge process, not the other player's. True frame-sharing across MP would require transporting roughly 17 MB/s of RGBA per concurrent stream plus an input-forwarding consensus layer; that is out of scope for PZFB at this time and deferred to a future major version.
 
 ### Game Example
 

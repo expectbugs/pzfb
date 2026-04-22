@@ -611,7 +611,7 @@ implements Serializable {
 
     private static final java.util.concurrent.ConcurrentHashMap<zombie.core.textures.Texture, Boolean> _fbState =
         new java.util.concurrent.ConcurrentHashMap<>();
-    private static final String PZFB_VERSION = "1.5.0";
+    private static final String PZFB_VERSION = "1.7.0";
 
     public static String fbPing() {
         return "PZFB " + PZFB_VERSION;
@@ -1681,9 +1681,44 @@ implements Serializable {
     private static volatile String _fbGameError = "";
     private static volatile boolean _fbGameStop = false;
     private static java.io.File _fbGameStderrLog = null;
+    private static volatile boolean _fbShutdownHookRegistered = false;
 
     /**
-     * Launch a game process with bidirectional I/O.
+     * Register a JVM shutdown hook the first time a game process is launched.
+     * Ensures fbGameStop() runs on normal JVM exit (and SIGTERM), preventing
+     * orphaned child processes when consumer mods forget to call gameStop().
+     *
+     * Limitation: shutdown hooks do NOT run on SIGKILL, power loss, or Windows
+     * "End task" — those still require the user to clean up manually (or a
+     * future orphan-scan feature).
+     */
+    private static void ensureShutdownHookRegistered() {
+        if (_fbShutdownHookRegistered) return;
+        synchronized (Color.class) {
+            if (_fbShutdownHookRegistered) return;
+            try {
+                Runtime.getRuntime().addShutdownHook(new Thread(new Runnable() {
+                    public void run() {
+                        try { fbGameStop(); } catch (Throwable ignore) {}
+                    }
+                }, "PZFB-GameShutdown"));
+                _fbShutdownHookRegistered = true;
+            } catch (Throwable ignore) {
+                // JVM already shutting down — best effort
+            }
+        }
+    }
+
+    /**
+     * Launch a game process with bidirectional I/O. Legacy string-based overload.
+     * Accepts a single whitespace-separated args string; arguments containing
+     * spaces MUST be wrapped in double quotes. Only simple `"..."` quoting is
+     * supported — no nested quotes, no backslash escapes.
+     *
+     * For any args derived from user input (paths that may contain spaces,
+     * apostrophes, Unicode, OneDrive redirects, etc.), prefer
+     * fbGameStartArgv(...) instead, which bypasses parsing entirely.
+     *
      * stdout: read into ring buffer as raw RGBA frames (reuses fbStreamFrame for upload)
      * stdin: writable via fbGameSendInput for keyboard events
      * Shares the stream ring buffer — cannot run simultaneously with fbStreamStart.
@@ -1694,6 +1729,42 @@ implements Serializable {
      * @param extraArgs  Additional command line arguments (space-separated; use "quotes" for paths with spaces)
      */
     public static void fbGameStart(String binaryPath, int width, int height, String extraArgs) {
+        java.util.ArrayList<String> parsed = new java.util.ArrayList<String>();
+        if (extraArgs != null && !extraArgs.trim().isEmpty()) {
+            parsed.addAll(splitQuotedArgs(extraArgs));
+        }
+        fbGameStartInternal(binaryPath, width, height, parsed);
+    }
+
+    /**
+     * Launch a game process with bidirectional I/O. Argv-array overload (1.7.0+).
+     * Each element of extraArgv is passed verbatim to the child process — no
+     * string splitting, no quote parsing, no escaping. Recommended for any
+     * paths that may contain spaces, quotes, backslashes, or Unicode.
+     *
+     * @param binaryPath Absolute path to the game binary
+     * @param width      Frame width in pixels
+     * @param height     Frame height in pixels
+     * @param extraArgv  Additional command-line arguments as a String[] (null elements skipped)
+     */
+    public static void fbGameStartArgv(String binaryPath, int width, int height, String[] extraArgv) {
+        java.util.ArrayList<String> parsed = new java.util.ArrayList<String>();
+        if (extraArgv != null) {
+            for (String a : extraArgv) {
+                if (a != null) parsed.add(a);
+            }
+        }
+        fbGameStartInternal(binaryPath, width, height, parsed);
+    }
+
+    /**
+     * Shared implementation — called by both the legacy string overload and
+     * the new array overload. Registers the JVM shutdown hook on first call.
+     */
+    private static void fbGameStartInternal(String binaryPath, int width, int height,
+                                             java.util.List<String> extraArgs) {
+        ensureShutdownHookRegistered();
+
         // Clean up any existing stream or game process
         fbGameStop();
         fbStreamStop();
@@ -1705,13 +1776,10 @@ implements Serializable {
         try { new java.io.File(binaryPath).setExecutable(true); } catch (Exception ignore) {}
 
         // Build args: [binaryPath, ...extraArgs]
-        // Uses quote-aware splitting so paths with spaces work when quoted
         java.util.ArrayList<String> argList = new java.util.ArrayList<>();
         argList.add(binaryPath);
-        if (extraArgs != null && !extraArgs.trim().isEmpty()) {
-            for (String a : splitQuotedArgs(extraArgs)) {
-                argList.add(a);
-            }
+        if (extraArgs != null) {
+            for (String a : extraArgs) argList.add(a);
         }
 
         try {

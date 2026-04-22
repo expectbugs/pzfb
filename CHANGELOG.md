@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.7.0 (2026-04-22)
+
+- **Added:** `PZFB.gameStartArgs(binaryPath, width, height, argv)` — array-based launch that bypasses the argument splitter. Use this for any path that may contain spaces, quotes, backslashes, or non-ASCII characters (Windows usernames like `Adam Marzello`, OneDrive-redirected Documents folders, apostrophes, Cyrillic/CJK/accented-Latin usernames). Each element of `argv` is passed verbatim to the child process — no escaping, no quoting, no parsing. Legacy `PZFB.gameStart(...)` continues to work unchanged.
+- **Added:** `Color.fbGameStartArgv(String, int, int, String[])` Java method (distinct name, not an overload, to avoid any Kahlua dispatch ambiguity). Kahlua auto-marshals a Lua table with 1-based numeric keys into the `String[]` parameter.
+- **Fixed:** Child game processes now terminate cleanly on JVM exit via a registered shutdown hook — prevents orphaned emulator/bridge processes from piling up across PZ sessions when a consumer mod forgets to call `PZFB.gameStop()` in some exit path, or when PZ exits via the normal Quit button without closing the emulator window. Limitation: the hook does **not** run on SIGKILL, power loss, or Windows Task Manager "End task" — a startup-time orphan scan is deferred to a future release.
+- **Added:** Upgrade-detection prompt — when Steam Workshop ships new Lua + `.dat` files but the user hasn't re-run the install script, `PZFBInit.lua` compares `Color.fbPing()`'s reported version against `mod.info` and, on mismatch, shows a visible on-screen "Update Required" panel with the path to a freshly regenerated `pzfb_install.bat` / `pzfb_install.sh`. This ensures no one is silently stuck with Lua-new / bytecode-old state where new Java methods (`fbGameStartArgv`, the shutdown hook, etc.) aren't available to the running game.
+- **Documented:** Explicit quoting rules for the legacy `gameStart`; multiplayer limitations of the Game Process API (per-player client-local, no frame sync); shutdown-hook behaviour and caveats.
+- Internal: bumped Java-side `PZFB_VERSION` constant to `"1.7.0"` (previously stale at `"1.5.0"`) so `fbPing()` reports the correct installed version for the mismatch check above.
+
+## 1.6.0 (2026-04-22)
+
+- **Fixed:** Windows argument parsing — `fbGameStart` now supports quote-aware splitting so paths containing spaces (e.g. `C:\Users\Adam Marzello\...`) work when wrapped in double quotes. Stderr is captured to a temp file and the first five lines surface in `gameError()` when a process exits before producing any frames — no more opaque "exited immediately" reports.
+- **Fixed:** `ProcessBuilder` working directory is now set to the binary's parent, so co-located DLLs resolve on Windows and config-file writes land next to the binary rather than in PZ's working directory.
+- **Fixed:** Install-script generation — Windows path detection corrected (`ProjectZomboid/projectzomboid.jar` on Windows, no inner `projectzomboid/` subdirectory as on Linux).
+- **Changed:** Workshop distribution now ships class files as `.dat` (inside `42/media/pzfb/`) and auto-generates a platform-specific install script at runtime (`~/Zomboid/Lua/pzfb_install.bat` or `.sh`) with the correct mod directory path embedded. Workshop blocks `.class`, `.bat`, and `.sh` from being uploaded directly.
+- **Changed:** `PZFB.VERSION` is now read from `mod.info` via `getModInfoByID("PZFB"):getModVersion()` (authoritative — covers Lua-only updates where the Java class files weren't rebuilt). `Color.fbPing()` remains the deployment check; its version string became a fallback.
+
 ## 1.5.2 (2026-04-12)
 
 - **Gamepad suppression** — PZ character no longer responds to captured gamepad input

@@ -380,6 +380,16 @@ function PZFB.gameStart(binaryPath, width, height, extraArgs)
     Color.fbGameStart(binaryPath, width, height, extraArgs or "")
 end
 
+-- Preferred form (1.7.0+): pass arguments as a Lua table to bypass quote-parsing.
+-- Each element is sent verbatim to the child process — spaces, quotes,
+-- backslashes, and Unicode all pass through without escaping. Use this for any
+-- path derived from user input (Windows usernames with spaces, OneDrive-redirected
+-- Documents folders, ROM paths with apostrophes, etc.).
+function PZFB.gameStartArgs(binaryPath, width, height, argv)
+    if not PZFB.AVAILABLE then return end
+    Color.fbGameStartArgv(binaryPath, width, height, argv or {})
+end
+
 function PZFB.gameSendInput(keycode, pressed)
     if not PZFB.AVAILABLE then return end
     Color.fbGameSendInput(keycode, pressed)
