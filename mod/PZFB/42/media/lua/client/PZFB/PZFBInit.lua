@@ -195,9 +195,23 @@ local function checkDeployment()
         -- Compare the class-file's reported version to the mod.info version.
         -- A mismatch means Workshop pushed new mod files but the user hasn't
         -- re-run the install script yet — the deployed bytecode is stale.
+        --
+        -- Patch-level skew tolerance (1.7.1+): only compare major.minor. Lua-only
+        -- patch releases bump mod.info but leave class files alone, so a 1.7.0
+        -- class file satisfies any 1.7.x mod release without forcing every
+        -- subscriber to re-run the install script. Minor (1.7 → 1.8) and major
+        -- bumps still surface the "Update Required" panel.
         local pingVer = tostring(result):match("PZFB (.+)") or ""
         PZFB._classVersion = pingVer
-        if pingVer ~= "" and PZFB.VERSION and pingVer ~= PZFB.VERSION then
+        local function _majMinor(v)
+            if not v or v == "" then return "" end
+            local maj, min = string.match(v, "^(%d+)%.(%d+)")
+            if maj and min then return maj .. "." .. min end
+            return v
+        end
+        local pingMM = _majMinor(pingVer)
+        local modMM  = _majMinor(PZFB.VERSION)
+        if pingMM ~= "" and modMM ~= "" and pingMM ~= modMM then
             PZFB._needsUpdate = true
             PZFB._installScript = generateInstallScript()
             print("[PZFB] Video Framebuffer v" .. PZFB.VERSION

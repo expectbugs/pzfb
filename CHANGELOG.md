@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.7.1 (2026-05-02)
+
+- **Fixed:** Gamepad seeding crash on B42 build `22869276` (Apr 22 2026 patch and later). PZ removed the global `isJoypadPressed(cid, n)` and ten `getJoypad*Button(cid)` globals (`getJoypadAButton`, `BButton`, `XButton`, `YButton`, `LBumper`, `RBumper`, `BackButton`, `StartButton`, `LeftStickButton`, `RightStickButton`). PZFBInput.lua now uses `JoypadButton.isButtonDown(cid, n)` for raw button polling and `JoypadButton.fromIndex(rawIndex)` for raw-index → button-identifier translation. Without this fix, dismissing an emulator's welcome screen with a controller plugged in throws `Object tried to call nil in _seedControllerState`; pressing any face button afterwards would have thrown `Object tried to call nil in _translateButton`.
+- **Changed:** Version-mismatch detector in PZFBInit.lua now tolerates patch-level skew between mod.info and the deployed class files. A 1.7.0 class file satisfies any 1.7.x mod release, so Lua-only patch updates ship through Workshop without forcing every subscriber to re-run the install script. Minor (`1.7 → 1.8`) and major version differences still surface the "Update Required" prompt.
+- **Compatibility:** This release requires PZ Build 42 patch `22869276` (Apr 22 2026) or newer. The new gamepad APIs do not exist on earlier B42 builds; PZFB 1.7.0 supports only earlier builds. There is no PZFB version that works on both sides of the patch — pick the one matching your PZ install.
+
 ## 1.7.0 (2026-04-22)
 
 - **Added:** `PZFB.gameStartArgs(binaryPath, width, height, argv)` — array-based launch that bypasses the argument splitter. Use this for any path that may contain spaces, quotes, backslashes, or non-ASCII characters (Windows usernames like `Adam Marzello`, OneDrive-redirected Documents folders, apostrophes, Cyrillic/CJK/accented-Latin usernames). Each element of `argv` is passed verbatim to the child process — no escaping, no quoting, no parsing. Legacy `PZFB.gameStart(...)` continues to work unchanged.

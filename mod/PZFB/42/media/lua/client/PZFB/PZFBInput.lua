@@ -437,11 +437,11 @@ function PZFBInputPanel:_seedControllerState(slot)
     local cid = slot.controllerId
     if not cid then return end
 
-    -- Seed buttons
+    -- Seed buttons (B42 Apr 22+: isJoypadPressed → JoypadButton.isButtonDown)
     local buttons = {}
     local btnCount = getButtonCount(cid)
     for n = 0, btnCount - 1 do
-        buttons[n] = isJoypadPressed(cid, n)
+        buttons[n] = JoypadButton.isButtonDown(cid, n)
     end
     slot.buttons = buttons
 
@@ -505,7 +505,7 @@ end
 -- Analogous to binding suppression for keyboard: we set
 -- JoypadState.controllers[cid].connected = false so PZ's update loop
 -- (JoypadControllerData:update) skips the controller entirely. Our own
--- raw polling via Java APIs (isJoypadPressed etc.) is unaffected.
+-- raw polling via Java APIs (JoypadButton.isButtonDown etc.) is unaffected.
 -- ============================================================================
 
 function PZFBInputPanel:_suppressController(cid)
@@ -1093,11 +1093,12 @@ function PZFBInputPanel:_pollSingleGamepad(slotNum, slot, cid)
     end
 
     -- Button polling (sole source of button callbacks — PZ-routed handlers are no-ops)
+    -- B42 Apr 22+: isJoypadPressed → JoypadButton.isButtonDown (same signature).
     local prevButtons = slot.buttons or {}
     slot.buttons = {}
     local btnCount = getButtonCount(cid)
     for n = 0, btnCount - 1 do
-        slot.buttons[n] = isJoypadPressed(cid, n)
+        slot.buttons[n] = JoypadButton.isButtonDown(cid, n)
         if slot.buttons[n] and not prevButtons[n] then
             local mapped = self:_translateButton(cid, n)
             if self.onPZFBGamepadDown then
@@ -1166,27 +1167,28 @@ function PZFBInputPanel:_isPlaystationByName(controllerId)
 end
 
 function PZFBInputPanel:_translateButton(controllerId, rawIndex)
-    -- Translate raw button index to Joypad constant, then apply position-based
-    -- remapping for PlayStation controllers. PZ maps by label (A=confirm=Cross,
-    -- B=back=Circle) but games expect physical position (A=east, B=south).
-    -- On PS controllers, Cross is south and Circle is east — opposite of the
-    -- Joypad.AButton/BButton semantic meaning. Swap A↔B and X↔Y so consumers
-    -- always receive position-correct button constants.
+    -- Translate raw button index to a Joypad button identifier, then apply the
+    -- physical-position remap for PlayStation controllers.
+    --
+    -- B42 Apr 22+: the per-controller getJoypadAButton/etc. globals were
+    -- removed. The replacement is JoypadButton.fromIndex(n), which maps a raw
+    -- button index to the matching JoypadButton enum value. PZ's JoyPadSetup
+    -- aliases Joypad.AButton = JoypadButton.A, Joypad.BButton = JoypadButton.B,
+    -- etc., so existing comparisons (mapped == Joypad.AButton) and consumer-mod
+    -- gamepad maps keyed on Joypad.* continue to work without changes.
+    --
+    -- fromIndex throws ArrayIndexOutOfBoundsException for out-of-range indices,
+    -- so bounds-check via JoypadButton.getButtonCount() first.
     local mapped = Joypad.Other
-    if rawIndex == getJoypadAButton(controllerId) then mapped = Joypad.AButton
-    elseif rawIndex == getJoypadBButton(controllerId) then mapped = Joypad.BButton
-    elseif rawIndex == getJoypadXButton(controllerId) then mapped = Joypad.XButton
-    elseif rawIndex == getJoypadYButton(controllerId) then mapped = Joypad.YButton
-    elseif rawIndex == getJoypadLBumper(controllerId) then mapped = Joypad.LBumper
-    elseif rawIndex == getJoypadRBumper(controllerId) then mapped = Joypad.RBumper
-    elseif rawIndex == getJoypadBackButton(controllerId) then mapped = Joypad.Back
-    elseif rawIndex == getJoypadStartButton(controllerId) then mapped = Joypad.Start
-    elseif rawIndex == getJoypadLeftStickButton(controllerId) then mapped = Joypad.LStickButton
-    elseif rawIndex == getJoypadRightStickButton(controllerId) then mapped = Joypad.RStickButton
+    if rawIndex >= 0 and rawIndex < JoypadButton.getButtonCount() then
+        mapped = JoypadButton.fromIndex(rawIndex)
     end
     -- Position remap for PlayStation controllers (Cross↔Circle, Square↔Triangle).
-    -- PZ's isPlaystationController only checks "Playstation"/"Dualshock" but misses
-    -- DualSense controllers. Also check the controller name for "DualSense".
+    -- PZ maps by label (A=confirm=Cross, B=back=Circle) but games expect
+    -- physical position (A=east, B=south). On PS controllers, Cross is south
+    -- and Circle is east — opposite of Joypad.AButton/BButton semantic meaning.
+    -- PZ's isPlaystationController only checks "Playstation"/"Dualshock" but
+    -- misses DualSense controllers. Our _isPlaystationByName covers those.
     if mapped ~= Joypad.Other and (isPlaystationController(controllerId) or self:_isPlaystationByName(controllerId)) then
         if mapped == Joypad.AButton then mapped = Joypad.BButton
         elseif mapped == Joypad.BButton then mapped = Joypad.AButton
