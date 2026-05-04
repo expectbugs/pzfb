@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.7.2 (2026-05-03)
+
+- **Fixed:** Cross-version gamepad support. PZFB 1.7.1 only worked on PZ 42.17+ (the Apr 22 patch); 1.7.0 only worked on PZ 42.16.3 and earlier. Players who hadn't yet updated PZ to 42.17 saw the "nil function" gamepad crash if they were on PZFB 1.7.1, and players who HAD updated saw the same crash if they stayed on PZFB 1.7.0. PZFB now feature-detects the gamepad API at Lua load time and dispatches each call (`isJoypadPressed` vs `JoypadButton.isButtonDown`, the ten removed `getJoypad*Button` globals vs `JoypadButton.fromIndex`) to whichever surface the running PZ has. A single PZFB build now works on both sides of the Apr 22 PZ patch.
+- **Internal:** All PZFB-internal call sites that touched the version-specific APIs (`_seedControllerState`, `_pollSingleGamepad`, `_translateButton`) now go through two load-time shims — `_isButtonDown(cid, n)` and `_translateRawButton(rawIndex, controllerId)` — defined once at the top of `PZFBInput.lua`. Console prints `[PZFB] Gamepad API: ...` on startup so users can confirm which path is active.
+
 ## 1.7.1 (2026-05-02)
 
 - **Fixed:** Gamepad seeding crash on B42 build `22869276` (Apr 22 2026 patch and later). PZ removed the global `isJoypadPressed(cid, n)` and ten `getJoypad*Button(cid)` globals (`getJoypadAButton`, `BButton`, `XButton`, `YButton`, `LBumper`, `RBumper`, `BackButton`, `StartButton`, `LeftStickButton`, `RightStickButton`). PZFBInput.lua now uses `JoypadButton.isButtonDown(cid, n)` for raw button polling and `JoypadButton.fromIndex(rawIndex)` for raw-index → button-identifier translation. Without this fix, dismissing an emulator's welcome screen with a controller plugged in throws `Object tried to call nil in _seedControllerState`; pressing any face button afterwards would have thrown `Object tried to call nil in _translateButton`.

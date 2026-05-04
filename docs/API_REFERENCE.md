@@ -496,7 +496,7 @@ PZFB.destroy(fb)
 require "PZFB/PZFBInput"
 ```
 
-> **B42 compatibility:** PZFB 1.7.1+ requires PZ B42 build `22869276` (Apr 22 2026) or newer. The April 22 PZ patch refactored the gamepad-button API — `isJoypadPressed` was renamed to `JoypadButton.isButtonDown`, and the per-controller `getJoypadAButton/BButton/XButton/YButton/LBumper/RBumper/BackButton/StartButton/LeftStickButton/RightStickButton` globals were removed in favour of `JoypadButton.fromIndex()`. PZFB 1.7.0 and earlier support PZ versions before that patch; 1.7.1+ supports only versions after. There is no single PZFB build that works on both sides of the patch — pick the one matching your PZ install.
+> **B42 compatibility:** PZFB 1.7.2+ supports both PZ 42.16.3 (and earlier B42 builds) and PZ 42.17+ (B42 build `22869276` and later). The April 22 PZ patch refactored the gamepad-button API — `isJoypadPressed` was renamed to `JoypadButton.isButtonDown`, and the per-controller `getJoypadAButton/BButton/XButton/YButton/LBumper/RBumper/BackButton/StartButton/LeftStickButton/RightStickButton` globals were removed in favour of `JoypadButton.fromIndex()`. PZFB 1.7.2 feature-detects at load time and dispatches to whichever API the running PZ exposes. Earlier PZFB releases (1.7.0 and 1.7.1) were single-version: 1.7.0 only worked pre-patch, 1.7.1 only worked post-patch.
 
 ### `PZFBInputPanel`
 

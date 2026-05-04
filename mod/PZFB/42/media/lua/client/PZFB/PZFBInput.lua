@@ -23,6 +23,60 @@ require "ISUI/ISPanelJoypad"
 require "ISUI/ISPanel"
 
 -- ============================================================================
+-- Cross-version gamepad-API shim
+-- ============================================================================
+-- The B42 Apr 22 patch (PZ 42.17) renamed/removed eleven gamepad globals.
+-- PZFB 1.7.2+ supports BOTH old and new API surfaces by feature-detecting at
+-- load time and dispatching to whichever is present.
+--
+-- Old (PZ 42.16.3 and earlier):
+--   isJoypadPressed(cid, n)
+--   getJoypadAButton(cid), getJoypadBButton(cid), ... and 8 more
+--
+-- New (PZ 42.17 and later):
+--   JoypadButton.isButtonDown(cid, n)
+--   JoypadButton.fromIndex(rawIndex)  (throws OOB; bounds-check via JoypadButton.getButtonCount)
+--
+-- Both wrappers below take the same (rawIndex, controllerId) signature; the
+-- new path ignores controllerId since the SDL gamepad mapping is uniform.
+
+local _hasNewJoypadAPI = (JoypadButton ~= nil and JoypadButton.isButtonDown ~= nil)
+
+local _isButtonDown
+local _translateRawButton
+
+if _hasNewJoypadAPI then
+    _isButtonDown = function(cid, n)
+        return JoypadButton.isButtonDown(cid, n)
+    end
+    _translateRawButton = function(rawIndex, _controllerId)
+        if rawIndex >= 0 and rawIndex < JoypadButton.getButtonCount() then
+            return JoypadButton.fromIndex(rawIndex)
+        end
+        return Joypad.Other
+    end
+else
+    _isButtonDown = function(cid, n)
+        return isJoypadPressed(cid, n)
+    end
+    _translateRawButton = function(rawIndex, controllerId)
+        if rawIndex == getJoypadAButton(controllerId) then return Joypad.AButton end
+        if rawIndex == getJoypadBButton(controllerId) then return Joypad.BButton end
+        if rawIndex == getJoypadXButton(controllerId) then return Joypad.XButton end
+        if rawIndex == getJoypadYButton(controllerId) then return Joypad.YButton end
+        if rawIndex == getJoypadLBumper(controllerId) then return Joypad.LBumper end
+        if rawIndex == getJoypadRBumper(controllerId) then return Joypad.RBumper end
+        if rawIndex == getJoypadBackButton(controllerId) then return Joypad.Back end
+        if rawIndex == getJoypadStartButton(controllerId) then return Joypad.Start end
+        if rawIndex == getJoypadLeftStickButton(controllerId) then return Joypad.LStickButton end
+        if rawIndex == getJoypadRightStickButton(controllerId) then return Joypad.RStickButton end
+        return Joypad.Other
+    end
+end
+
+print("[PZFB] Gamepad API: " .. (_hasNewJoypadAPI and "JoypadButton.* (PZ 42.17+)" or "isJoypadPressed/etc. (PZ 42.16.3 and earlier)"))
+
+-- ============================================================================
 -- Module Constants
 -- ============================================================================
 
@@ -437,11 +491,11 @@ function PZFBInputPanel:_seedControllerState(slot)
     local cid = slot.controllerId
     if not cid then return end
 
-    -- Seed buttons (B42 Apr 22+: isJoypadPressed → JoypadButton.isButtonDown)
+    -- Seed buttons (cross-version via shim)
     local buttons = {}
     local btnCount = getButtonCount(cid)
     for n = 0, btnCount - 1 do
-        buttons[n] = JoypadButton.isButtonDown(cid, n)
+        buttons[n] = _isButtonDown(cid, n)
     end
     slot.buttons = buttons
 
@@ -1093,12 +1147,12 @@ function PZFBInputPanel:_pollSingleGamepad(slotNum, slot, cid)
     end
 
     -- Button polling (sole source of button callbacks — PZ-routed handlers are no-ops)
-    -- B42 Apr 22+: isJoypadPressed → JoypadButton.isButtonDown (same signature).
+    -- Uses cross-version shim _isButtonDown (handles PZ 42.16.3 ↔ 42.17+ rename).
     local prevButtons = slot.buttons or {}
     slot.buttons = {}
     local btnCount = getButtonCount(cid)
     for n = 0, btnCount - 1 do
-        slot.buttons[n] = JoypadButton.isButtonDown(cid, n)
+        slot.buttons[n] = _isButtonDown(cid, n)
         if slot.buttons[n] and not prevButtons[n] then
             local mapped = self:_translateButton(cid, n)
             if self.onPZFBGamepadDown then
@@ -1170,19 +1224,13 @@ function PZFBInputPanel:_translateButton(controllerId, rawIndex)
     -- Translate raw button index to a Joypad button identifier, then apply the
     -- physical-position remap for PlayStation controllers.
     --
-    -- B42 Apr 22+: the per-controller getJoypadAButton/etc. globals were
-    -- removed. The replacement is JoypadButton.fromIndex(n), which maps a raw
-    -- button index to the matching JoypadButton enum value. PZ's JoyPadSetup
-    -- aliases Joypad.AButton = JoypadButton.A, Joypad.BButton = JoypadButton.B,
-    -- etc., so existing comparisons (mapped == Joypad.AButton) and consumer-mod
-    -- gamepad maps keyed on Joypad.* continue to work without changes.
-    --
-    -- fromIndex throws ArrayIndexOutOfBoundsException for out-of-range indices,
-    -- so bounds-check via JoypadButton.getButtonCount() first.
-    local mapped = Joypad.Other
-    if rawIndex >= 0 and rawIndex < JoypadButton.getButtonCount() then
-        mapped = JoypadButton.fromIndex(rawIndex)
-    end
+    -- _translateRawButton is a load-time-resolved shim that routes to either
+    -- the legacy getJoypadAButton/etc. globals (PZ 42.16.3 and earlier) or the
+    -- new JoypadButton.fromIndex (PZ 42.17+). Either way it returns a value
+    -- comparable against Joypad.AButton/etc. — PZ aliases those constants
+    -- appropriately for whichever API version is active, so consumer-mod
+    -- gamepad maps keyed on Joypad.* keep working without changes.
+    local mapped = _translateRawButton(rawIndex, controllerId)
     -- Position remap for PlayStation controllers (Cross↔Circle, Square↔Triangle).
     -- PZ maps by label (A=confirm=Cross, B=back=Circle) but games expect
     -- physical position (A=east, B=south). On PS controllers, Cross is south
